@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Overhead Flight Data for TRMNL</title>
+  <desc id="desc">A top-down aircraft over a radar target and flight data bars on a monochrome e-ink display.</desc>
+
+  <!-- Rounded app tile -->
+  <rect width="512" height="512" rx="96" fill="#000"/>
+
+  <!-- TRMNL device -->
+  <rect x="64" y="70" width="384" height="372" rx="38" fill="#fff"/>
+  <rect x="88" y="94" width="336" height="274" rx="18" fill="#000"/>
+
+  <!-- Radar target -->
+  <g fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round">
+    <circle cx="224" cy="226" r="94" stroke-dasharray="62 24"/>
+    <path d="M224 116v24M224 312v24M114 226h24M310 226h24"/>
+  </g>
+
+  <!-- Top-down aircraft silhouette -->
+  <path fill="#fff" d="M224 116c-12 17-17 45-18 77l-72 43v22l72-23 3 57-30 22v17l45-13 45 13v-17l-30-22 3-57 72 23v-22l-72-43c-1-32-6-60-18-77Z"/>
+  <path d="M224 145v139" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Compact flight-data readout -->
+  <g fill="#fff">
+    <circle cx="350" cy="155" r="8"/>
+    <rect x="370" y="148" width="34" height="14" rx="7"/>
+    <circle cx="350" cy="197" r="8"/>
+    <rect x="370" y="190" width="24" height="14" rx="7"/>
+    <circle cx="350" cy="239" r="8"/>
+    <rect x="370" y="232" width="42" height="14" rx="7"/>
+    <circle cx="350" cy="281" r="8"/>
+    <rect x="370" y="274" width="30" height="14" rx="7"/>
+  </g>
+
+  <!-- Device bezel details -->
+  <rect x="188" y="394" width="136" height="14" rx="7" fill="#000"/>
+  <circle cx="397" cy="401" r="8" fill="#000"/>
+</svg>

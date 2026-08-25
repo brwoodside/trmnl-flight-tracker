@@ -5,8 +5,13 @@
       <div class="content">
         <span class="label">Closest overhead</span>
         <span class="value value--xlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
-        <span class="title">{{ aircraft.route }}</span>
-        <span class="description">{{ aircraft.aircraft_label }}</span>
+        {% if aircraft.operator %}
+          <span class="title" data-clamp="1">{{ aircraft.operator }}</span>
+          <span class="description" data-clamp="1">{{ aircraft.route }} · {{ aircraft.aircraft_label }}</span>
+        {% else %}
+          <span class="title" data-clamp="1">{{ aircraft.route }}</span>
+          <span class="description" data-clamp="1">{{ aircraft.aircraft_label }}</span>
+        {% endif %}
       </div>
     </div>
     <div class="divider"></div>

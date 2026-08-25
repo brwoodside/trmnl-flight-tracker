@@ -1,12 +1,17 @@
 {% if has_aircraft %}
-  <div class="layout layout--col gap--space-between">
-    <div class="grid grid--cols-2">
+  <div class="layout layout--col gap--small">
+    <div class="grid grid--cols-2 grow">
       <div class="item">
         <div class="meta"></div>
         <div class="content">
           <span class="label label--large">Closest overhead</span>
-          <span class="value value--xxxlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
-          <span class="title title--large">{{ aircraft.route }}</span>
+          <span class="value value--mega" data-fit-value="true">{{ aircraft.identifier }}</span>
+          {% if aircraft.operator %}
+            <span class="title title--large" data-clamp="1">{{ aircraft.operator }}</span>
+            <span class="description description--large" data-clamp="1">{{ aircraft.route }}</span>
+          {% else %}
+            <span class="title title--large" data-clamp="1">{{ aircraft.route }}</span>
+          {% endif %}
           <span class="description">{{ aircraft.aircraft_label }}</span>
         </div>
       </div>
@@ -15,28 +20,28 @@
         <div class="item">
           <div class="meta"></div>
           <div class="content">
-            <span class="value value--medium value--tnums">{{ aircraft.distance_display }}</span>
+            <span class="value value--large value--tnums" data-fit-value="true">{{ aircraft.distance_display }}</span>
             <span class="label">{{ aircraft.bearing_compass }} from {{ location_label }}</span>
           </div>
         </div>
         <div class="item">
           <div class="meta"></div>
           <div class="content">
-            <span class="value value--medium value--tnums">{{ aircraft.altitude_compact }}</span>
+            <span class="value value--large value--tnums" data-fit-value="true">{{ aircraft.altitude_compact }}</span>
             <span class="label">Altitude</span>
           </div>
         </div>
         <div class="item">
           <div class="meta"></div>
           <div class="content">
-            <span class="value value--medium value--tnums">{{ aircraft.speed_display }}</span>
+            <span class="value value--large value--tnums" data-fit-value="true">{{ aircraft.speed_display }}</span>
             <span class="label">Ground speed</span>
           </div>
         </div>
         <div class="item">
           <div class="meta"></div>
           <div class="content">
-            <span class="value value--medium">{{ aircraft.vertical_trend_short }}</span>
+            <span class="value value--large" data-fit-value="true">{{ aircraft.vertical_trend_short }}</span>
             <span class="label">{{ aircraft.vertical_rate_display }}</span>
           </div>
         </div>
@@ -45,7 +50,7 @@
 
     <div class="divider"></div>
 
-    <div class="grid grid--cols-4">
+    <div class="grid grid--cols-4 h--24 no-shrink">
       <div class="item">
         <div class="meta"></div>
         <div class="content">

@@ -83,6 +83,7 @@ class RunTests(unittest.TestCase):
         self.assertTrue(result["has_aircraft"])
         self.assertEqual(result["provider_used"], "adsblol")
         self.assertEqual(result["aircraft"]["identifier"], "UAL123")
+        self.assertEqual(result["aircraft"]["operator"], "United Airlines")
         self.assertEqual(result["aircraft"]["route"], "Route unavailable")
         self.assertLess(result["aircraft"]["distance_nm"], 1)
 

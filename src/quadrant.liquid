@@ -1,6 +1,9 @@
 {% if has_aircraft %}
   <div class="layout layout--col layout--center">
     <span class="value value--xxlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
+    {% if aircraft.operator %}
+      <span class="label" data-clamp="1">{{ aircraft.operator }}</span>
+    {% endif %}
     <span class="title">{{ aircraft.distance_display }} {{ aircraft.bearing_compass }}</span>
     <span class="description">{{ aircraft.altitude_display }} · {{ aircraft.speed_display }}</span>
   </div>
