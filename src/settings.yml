@@ -1,85 +1,106 @@
-# Managed by `trmnlp push` / `trmnlp pull` after the first deployment.
 ---
 strategy: polling
-name: Overhead Flight Tracker
-description: Closest aircraft overhead
-polling_verb: get
-polling_url: https://api.adsb.lol/v2/point/{{ latitude }}/{{ longitude }}/{{ radius_nm }}
-polling_headers: 'Accept=application/json'
 no_screen_padding: 'no'
 dark_mode: 'no'
-refresh_interval: 10
+static_data: ''
+polling_verb: get
 framework_version: latest
 serverless_language: python
+polling_url: https://api.adsb.lol/v2/point/{{ latitude }}/{{ longitude }}/{{ radius_nm }}
+polling_headers: Accept=application/json
+polling_body: ''
+id: 456500
+oauth_enabled: 'false'
+oauth_pkce_enabled: 'no'
+oauth_authorize_url: ''
+oauth_token_url: ''
+oauth_scopes: ''
+oauth_scope_separator: ''
+oauth_refresh_url: ''
+oauth_auth_params: ''
+oauth_token_headers: ''
+oauth_token_site: ''
+oauth_token_params: ''
+oauth_token_request_auth_method: ''
+oauth_body_format: ''
+oauth_token_response_metadata: ''
+oauth_authorization_method: ''
+oauth_refresh_params: ''
+oauth_token_field_name: ''
+oauth_expiry_field_name: ''
+oauth_expiry_strategy: ''
+oauth_fixed_expiry_ms: ''
 custom_fields:
-  - keyname: latitude
-    field_type: number
-    step: 0.000001
-    min: -90
-    max: 90
-    name: Latitude
-    description: Decimal latitude of the observation point.
-    placeholder: 37.7749
-    group: Location
-  - keyname: longitude
-    field_type: number
-    step: 0.000001
-    min: -180
-    max: 180
-    name: Longitude
-    description: Decimal longitude of the observation point.
-    placeholder: -122.4194
-    group: Location
-  - keyname: location_label
-    field_type: string
-    name: Location label
-    description: Short label shown on the display.
-    placeholder: Home
-    default: Home
-    maxlength: 30
-    group: Location
-  - keyname: radius_nm
-    field_type: number
-    min: 1
-    max: 250
-    step: 1
-    name: Search radius
-    description: Maximum horizontal distance in nautical miles.
-    default: 20
-    placeholder: 20
-    group: Location
-  - keyname: max_age_minutes
-    field_type: number
-    min: 1
-    max: 60
-    step: 1
-    name: Maximum position age
-    description: Ignore stale aircraft positions older than this many minutes.
-    default: 5
-    placeholder: 5
-    group: Data quality
-  - keyname: provider_order
-    field_type: select
-    name: Provider preference
-    description: Paid providers are tried when their credentials are present; ADSB.lol is always the final fallback.
-    options:
-      - Automatic (FR24 first): auto
-      - FlightAware first: flightaware_first
-      - ADSB.lol only: open_only
-    default: auto
-    group: Data providers
-  - keyname: fr24_api_token
-    field_type: password
-    name: Flightradar24 API token
-    description: Optional paid FR24 API token. Uses Live Flight Positions Full.
-    placeholder: Optional
-    optional: true
-    group: Data providers
-  - keyname: flightaware_api_key
-    field_type: password
-    name: FlightAware AeroAPI key
-    description: Optional AeroAPI v4 key used when FR24 is unavailable or not preferred.
-    placeholder: Optional
-    optional: true
-    group: Data providers
-
+- keyname: latitude
+  field_type: number
+  step: 1.0e-06
+  min: -90
+  max: 90
+  name: Latitude
+  description: Decimal latitude of the observation point.
+  placeholder: 37.7749
+  group: Location
+- keyname: longitude
+  field_type: number
+  step: 1.0e-06
+  min: -180
+  max: 180
+  name: Longitude
+  description: Decimal longitude of the observation point.
+  placeholder: -122.4194
+  group: Location
+- keyname: location_label
+  field_type: string
+  name: Location label
+  description: Short label shown on the display.
+  placeholder: Home
+  default: Home
+  maxlength: 30
+  group: Location
+- keyname: radius_nm
+  field_type: number
+  min: 1
+  max: 250
+  step: 1
+  name: Search radius
+  description: Maximum horizontal distance in nautical miles.
+  default: 20
+  placeholder: 20
+  group: Location
+- keyname: max_age_minutes
+  field_type: number
+  min: 1
+  max: 60
+  step: 1
+  name: Maximum position age
+  description: Ignore stale aircraft positions older than this many minutes.
+  default: 5
+  placeholder: 5
+  group: Data quality
+- keyname: provider_order
+  field_type: select
+  name: Provider preference
+  description: Paid providers are tried when their credentials are present; ADSB.lol is always the final fallback.
+  options:
+  - Automatic (FR24 first): auto
+  - FlightAware first: flightaware_first
+  - ADSB.lol only: open_only
+  default: auto
+  group: Data providers
+- keyname: fr24_api_token
+  field_type: password
+  name: Flightradar24 API token
+  description: Optional paid FR24 API token. Uses Live Flight Positions Full.
+  placeholder: Optional
+  optional: true
+  group: Data providers
+- keyname: flightaware_api_key
+  field_type: password
+  name: FlightAware AeroAPI key
+  description: Optional AeroAPI v4 key used when FR24 is unavailable or not preferred.
+  placeholder: Optional
+  optional: true
+  group: Data providers
+name: Overhead Flight Tracker
+description: Closest aircraft overhead
+refresh_interval: 15
