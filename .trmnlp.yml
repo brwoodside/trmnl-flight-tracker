@@ -1,0 +1,23 @@
+# Local-only configuration for `bin/trmnlp serve`.
+# Replace the sample coordinates or export the environment variables below.
+---
+watch:
+  - .trmnlp.yml
+  - src
+
+custom_fields:
+  latitude: "{{ env.TRACKER_LATITUDE | default: 37.7749 }}"
+  longitude: "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+  location_label: "{{ env.TRACKER_LOCATION_LABEL | default: San Francisco }}"
+  radius_nm: "{{ env.TRACKER_RADIUS_NM | default: 20 }}"
+  max_age_minutes: "{{ env.TRACKER_MAX_AGE_MINUTES | default: 5 }}"
+  provider_order: "{{ env.TRACKER_PROVIDER_ORDER | default: auto }}"
+  fr24_api_token: "{{ env.FR24_API_TOKEN }}"
+  flightaware_api_key: "{{ env.FLIGHTAWARE_AEROAPI_KEY }}"
+
+time_zone: America/Los_Angeles
+transform_runtime: enabled
+
+variables:
+  trmnl: {}
+

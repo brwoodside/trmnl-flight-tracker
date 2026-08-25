@@ -1,0 +1,57 @@
+{% if has_aircraft %}
+  <div class="layout layout--col gap--space-between">
+    <div class="item">
+      <div class="meta"></div>
+      <div class="content">
+        <span class="label">Closest overhead</span>
+        <span class="value value--xlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
+        <span class="title">{{ aircraft.route }}</span>
+        <span class="description">{{ aircraft.aircraft_label }}</span>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="grid grid--cols-2">
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium value--tnums">{{ aircraft.distance_display }}</span>
+          <span class="label">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium value--tnums">{{ aircraft.altitude_compact }}</span>
+          <span class="label">Altitude</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium value--tnums">{{ aircraft.speed_display }}</span>
+          <span class="label">Ground speed</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium">{{ aircraft.vertical_trend_short }}</span>
+          <span class="label">{{ aircraft.heading_compass }} heading</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="title_bar">
+    <span class="title">Overhead Flight Tracker</span>
+    <span class="instance">{{ aircraft.source_label }}</span>
+  </div>
+{% else %}
+  <div class="layout layout--col layout--center">
+    <span class="value value--large">No aircraft</span>
+    <span class="title">{{ message }}</span>
+    <span class="description">{{ location_label }}</span>
+  </div>
+  <div class="title_bar">
+    <span class="title">Overhead Flight Tracker</span>
+  </div>
+{% endif %}

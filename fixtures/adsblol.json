@@ -1,0 +1,44 @@
+{
+  "ac": [
+    {
+      "hex": "a1b2c3",
+      "flight": "UAL123 ",
+      "r": "N123UA",
+      "t": "B738",
+      "ownOp": "United Airlines",
+      "alt_baro": 11250,
+      "gs": 286.4,
+      "track": 132.0,
+      "baro_rate": -640,
+      "lat": 37.7830,
+      "lon": -122.4100,
+      "seen_pos": 8.0
+    },
+    {
+      "hex": "d4e5f6",
+      "flight": "TEST45 ",
+      "r": "N45TEST",
+      "t": "C172",
+      "alt_baro": 3200,
+      "gs": 105.0,
+      "track": 270.0,
+      "baro_rate": 0,
+      "lat": 37.8500,
+      "lon": -122.5000,
+      "seen_pos": 4.0
+    },
+    {
+      "hex": "000001",
+      "flight": "GROUND1 ",
+      "alt_baro": "ground",
+      "gs": 12.0,
+      "lat": 37.7750,
+      "lon": -122.4195,
+      "seen_pos": 1.0
+    }
+  ],
+  "msg": "No error",
+  "now": 1787688000000,
+  "total": 3
+}
+

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+if command -v trmnlp &> /dev/null
+then
+    trmnlp "$@"
+    exit
+fi
+
+if [ -n "$XDG_CONFIG_HOME" ]; then
+    CONFIG_DIR="$XDG_CONFIG_HOME/trmnlp"
+else
+    CONFIG_DIR="$HOME/.config/trmnlp"
+fi
+
+if [ ! -d "$CONFIG_DIR" ]; then
+    mkdir -p "$CONFIG_DIR"
+fi
+
+if command -v docker &> /dev/null
+then
+    docker run \
+        -it \
+        --rm \
+        --publish 4567:4567 \
+        --env TRACKER_LATITUDE \
+        --env TRACKER_LONGITUDE \
+        --env TRACKER_LOCATION_LABEL \
+        --env TRACKER_RADIUS_NM \
+        --env TRACKER_MAX_AGE_MINUTES \
+        --env TRACKER_PROVIDER_ORDER \
+        --env FR24_API_TOKEN \
+        --env FLIGHTAWARE_AEROAPI_KEY \
+        --volume "$(pwd):/plugin" \
+        --volume "$CONFIG_DIR:/root/.config/trmnlp" \
+        trmnl/trmnlp "$@"
+    exit
+fi
+
+echo "Install the trmnl_preview gem:
+
+  gem install trmnl_preview
+
+Or install Docker:
+
+  https://docs.docker.com/get-docker/"
+
+exit 1

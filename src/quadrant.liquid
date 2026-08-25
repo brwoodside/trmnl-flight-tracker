@@ -1,0 +1,20 @@
+{% if has_aircraft %}
+  <div class="layout layout--col layout--center">
+    <span class="value value--xxlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
+    <span class="title">{{ aircraft.distance_display }} {{ aircraft.bearing_compass }}</span>
+    <span class="description">{{ aircraft.altitude_display }} · {{ aircraft.speed_display }}</span>
+  </div>
+  <div class="title_bar title_bar--small">
+    <span class="title">Overhead</span>
+    <span class="instance">{{ aircraft.source_label }}</span>
+  </div>
+{% else %}
+  <div class="layout layout--col layout--center">
+    <span class="value value--large">Clear sky</span>
+    <span class="description">No aircraft within {{ search_radius_nm }} nm</span>
+  </div>
+  <div class="title_bar title_bar--small">
+    <span class="title">Overhead</span>
+    <span class="instance">{{ location_label }}</span>
+  </div>
+{% endif %}

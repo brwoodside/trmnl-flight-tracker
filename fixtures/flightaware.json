@@ -1,0 +1,36 @@
+{
+  "flights": [
+    {
+      "ident": "ASA331",
+      "ident_icao": "ASA331",
+      "ident_iata": "AS331",
+      "fa_flight_id": "ASA331-1787680000-airline-0012",
+      "registration": "N331AS",
+      "aircraft_type": "B39M",
+      "origin": {
+        "code": "KSJC",
+        "code_icao": "KSJC",
+        "code_iata": "SJC"
+      },
+      "destination": {
+        "code": "KPDX",
+        "code_icao": "KPDX",
+        "code_iata": "PDX"
+      },
+      "last_position": {
+        "fa_flight_id": "ASA331-1787680000-airline-0012",
+        "altitude": 145,
+        "altitude_change": "C",
+        "groundspeed": 310,
+        "heading": 5,
+        "latitude": 37.7950,
+        "longitude": -122.4300,
+        "timestamp": "2026-08-25T12:00:00Z",
+        "update_type": "A"
+      }
+    }
+  ],
+  "links": null,
+  "num_pages": 1
+}
+

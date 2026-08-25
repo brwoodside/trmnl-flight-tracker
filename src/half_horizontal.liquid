@@ -1,0 +1,41 @@
+{% if has_aircraft %}
+  <div class="layout gap--space-between">
+    <div class="item">
+      <div class="meta"></div>
+      <div class="content">
+        <span class="value value--xxlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
+        <span class="title">{{ aircraft.route }}</span>
+        <span class="description">{{ aircraft.aircraft_label }}</span>
+      </div>
+    </div>
+    <div class="grid grid--cols-2">
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium value--tnums">{{ aircraft.distance_display }}</span>
+          <span class="label">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium value--tnums">{{ aircraft.altitude_compact }}</span>
+          <span class="label">{{ aircraft.speed_display }} · {{ aircraft.heading_compass }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="title_bar title_bar--small">
+    <span class="title">Overhead Flight Tracker</span>
+    <span class="instance">{{ aircraft.source_label }} · {{ aircraft.age_display }}</span>
+  </div>
+{% else %}
+  <div class="layout layout--col layout--center">
+    <span class="value value--large">No aircraft</span>
+    <span class="description">{{ message }}</span>
+  </div>
+  <div class="title_bar title_bar--small">
+    <span class="title">Overhead Flight Tracker</span>
+    <span class="instance">{{ location_label }}</span>
+  </div>
+{% endif %}

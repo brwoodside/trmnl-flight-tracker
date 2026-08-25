@@ -1,0 +1,27 @@
+{
+  "data": [
+    {
+      "fr24_id": "333ca4a2",
+      "flight": "SK7679",
+      "callsign": "SAS7679",
+      "lat": 37.7900,
+      "lon": -122.4000,
+      "track": 219,
+      "alt": 18000,
+      "gspeed": 440,
+      "vspeed": 64,
+      "timestamp": "2026-08-25T12:00:00Z",
+      "source": "ADSB",
+      "hex": "4CAD41",
+      "type": "A20N",
+      "reg": "EI-SIN",
+      "painted_as": "SAS",
+      "operating_as": "SAS",
+      "orig_iata": "SFO",
+      "orig_icao": "KSFO",
+      "dest_iata": "SEA",
+      "dest_icao": "KSEA"
+    }
+  ]
+}
+

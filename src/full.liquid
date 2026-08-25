@@ -1,0 +1,94 @@
+{% if has_aircraft %}
+  <div class="layout layout--col gap--space-between">
+    <div class="grid grid--cols-2">
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="label label--large">Closest overhead</span>
+          <span class="value value--xxxlarge" data-fit-value="true">{{ aircraft.identifier }}</span>
+          <span class="title title--large">{{ aircraft.route }}</span>
+          <span class="description">{{ aircraft.aircraft_label }}</span>
+        </div>
+      </div>
+
+      <div class="grid grid--cols-2">
+        <div class="item">
+          <div class="meta"></div>
+          <div class="content">
+            <span class="value value--medium value--tnums">{{ aircraft.distance_display }}</span>
+            <span class="label">{{ aircraft.bearing_compass }} from {{ location_label }}</span>
+          </div>
+        </div>
+        <div class="item">
+          <div class="meta"></div>
+          <div class="content">
+            <span class="value value--medium value--tnums">{{ aircraft.altitude_compact }}</span>
+            <span class="label">Altitude</span>
+          </div>
+        </div>
+        <div class="item">
+          <div class="meta"></div>
+          <div class="content">
+            <span class="value value--medium value--tnums">{{ aircraft.speed_display }}</span>
+            <span class="label">Ground speed</span>
+          </div>
+        </div>
+        <div class="item">
+          <div class="meta"></div>
+          <div class="content">
+            <span class="value value--medium">{{ aircraft.vertical_trend_short }}</span>
+            <span class="label">{{ aircraft.vertical_rate_display }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="grid grid--cols-4">
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--small">{{ aircraft.registration | default: "—" }}</span>
+          <span class="label">Registration</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium">{{ aircraft.aircraft_type | default: "—" }}</span>
+          <span class="label">Aircraft</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--medium value--tnums">{{ aircraft.heading_compass }} {{ aircraft.heading_deg | default: "—" }}°</span>
+          <span class="label">Heading</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="content">
+          <span class="value value--small value--tnums">{{ candidate_count }}</span>
+          <span class="label">Fresh candidates</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="title_bar">
+    <span class="title">Overhead Flight Tracker</span>
+    <span class="instance">{{ aircraft.source_label }} · {{ aircraft.age_display }}</span>
+  </div>
+{% else %}
+  <div class="layout layout--col layout--center">
+    <span class="value value--xxlarge">No aircraft</span>
+    <span class="title title--large">{{ message }}</span>
+    <span class="description">{{ location_label }}</span>
+  </div>
+  <div class="title_bar">
+    <span class="title">Overhead Flight Tracker</span>
+    <span class="instance">{{ status }}</span>
+  </div>
+{% endif %}
