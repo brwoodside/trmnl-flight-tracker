@@ -59,10 +59,14 @@ closer than one directly above.
 
 ## Display fields
 
-The full view shows flight/callsign, route when available, aircraft type,
-registration, distance and bearing, altitude, ground speed, heading, vertical
-trend/rate, source, observation age, and number of fresh candidates. Smaller
-mashup views progressively reduce this to the highest-signal fields for e-ink.
+The full view shows flight/callsign, route when available, aircraft name and
+ICAO type code, registration, distance and bearing, altitude, ground speed,
+heading, vertical trend/rate, source, observation age, and number of fresh
+candidates. Smaller mashup views progressively reduce this to the
+highest-signal fields for e-ink. A provider's long aircraft description is
+used when present. A compact built-in lookup expands common ICAO designators
+without making another API request; an unknown type still falls back to its
+code.
 
 ## Configuration
 
@@ -199,6 +203,22 @@ that a feeder-obtained API key may be required in the future. The display keeps
 source attribution visible when ADSB.lol is selected; redistribution or a
 derived database may create additional ODbL obligations.
 
+### Aircraft name resolution
+
+The ADSB.lol-compatible aircraft response can include readsb's optional
+[`desc` long-type field](https://github.com/wiedehopf/readsb/blob/dev/README-json.md#aircraftjson-and---json-port),
+which the plugin uses directly. FR24's live-position response and FlightAware's
+advanced flight search provide an ICAO type designator rather than a long model
+name. FlightAware offers a separate paid
+[`/aircraft/types/{type}` lookup](https://www.flightaware.com/commercial/aeroapi/),
+but calling it on every refresh would increase both cost and failure surface.
+
+The transform therefore prefers a provider description, then checks a compact
+local map of common airline and general-aviation designators, then displays the
+original code. The local map is intentionally not a copy of the complete ICAO
+Doc 8643 dataset; uncommon or ambiguous types remain honest code-only
+fallbacks until they can be added and tested.
+
 ### Refresh cadence and privacy
 
 `refresh_interval: 10` is the requested plugin minimum. TRMNL currently applies
@@ -220,7 +240,8 @@ Use an approximate location if publishing exact home coordinates is a concern.
   over the records returned, not necessarily every aircraft a provider knows
   about in unusually dense airspace.
 - ADS-B feeds often lack commercial route, operator, or aircraft metadata; the
-  layouts intentionally degrade to callsign/registration and motion fields.
+  layouts intentionally degrade from the long aircraft name to its ICAO type
+  code, then to callsign/registration and motion fields.
 - The transform handles bounding boxes that cross the antimeridian by issuing
   two commercial-provider requests. That is correct geographically but can
   double the paid query cost near longitude ±180°.

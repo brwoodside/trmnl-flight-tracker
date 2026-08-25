@@ -59,6 +59,13 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(len(normalized), 2)
         self.assertNotIn("GROUND1", {item["identifier"] for item in normalized})
 
+    def test_local_aircraft_name_fills_optional_provider_description(self):
+        self.assertEqual(transform._aircraft_name("PA18"), "Piper PA-18 Super Cub")
+        self.assertEqual(
+            transform._aircraft_name("PA18", "Custom provider description"),
+            "Custom provider description",
+        )
+
     def test_flightaware_altitude_is_hundreds_of_feet(self):
         normalized = transform.normalize_flightaware(fixture("flightaware.json"))
         self.assertEqual(normalized[0]["altitude_ft"], 14500)
@@ -84,6 +91,8 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["provider_used"], "adsblol")
         self.assertEqual(result["aircraft"]["identifier"], "UAL123")
         self.assertEqual(result["aircraft"]["operator"], "United Airlines")
+        self.assertEqual(result["aircraft"]["aircraft_name"], "BOEING 737-800")
+        self.assertEqual(result["aircraft"]["aircraft_label"], "BOEING 737-800 · N123UA")
         self.assertEqual(result["aircraft"]["route"], "Route unavailable")
         self.assertLess(result["aircraft"]["distance_nm"], 1)
 
@@ -114,6 +123,7 @@ class RunTests(unittest.TestCase):
             )
         self.assertEqual(result["provider_used"], "flightaware")
         self.assertEqual(result["aircraft"]["identifier"], "AS331")
+        self.assertEqual(result["aircraft"]["aircraft_name"], "Boeing 737 MAX 9")
         self.assertEqual(result["aircraft"]["route"], "SJC → PDX")
         self.assertEqual(result["provider_attempts"][0]["status"], "error")
 

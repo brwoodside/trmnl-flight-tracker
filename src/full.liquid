@@ -50,7 +50,7 @@
 
     <div class="divider"></div>
 
-    <div class="grid grid--cols-4 h--24 no-shrink">
+    <div class="grid grid--cols-4 h--32 no-shrink">
       <div class="item">
         <div class="meta"></div>
         <div class="content">
@@ -61,8 +61,12 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium">{{ aircraft.aircraft_type | default: "—" }}</span>
-          <span class="label">Aircraft</span>
+          <span class="value value--small" data-fit-value="true">{{ aircraft.aircraft_name | default: aircraft.aircraft_type | default: "—" }}</span>
+          {% if aircraft.aircraft_name and aircraft.aircraft_type %}
+            <span class="label">Aircraft · {{ aircraft.aircraft_type }}</span>
+          {% else %}
+            <span class="label">Aircraft</span>
+          {% endif %}
         </div>
       </div>
       <div class="item">

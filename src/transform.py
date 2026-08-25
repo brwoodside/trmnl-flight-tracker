@@ -25,6 +25,96 @@ HTTP_TIMEOUT_SECONDS = 8
 USER_AGENT = "TRMNL-Overhead-Flight-Tracker/1.0"
 EARTH_RADIUS_NM = 3440.065
 
+# Provider descriptions are more specific and always win. This deliberately
+# compact fallback covers common, unambiguous ICAO designators without adding a
+# paid lookup request or shipping the full, frequently revised Doc 8643 data.
+AIRCRAFT_TYPE_NAMES = {
+    "A318": "Airbus A318",
+    "A319": "Airbus A319",
+    "A320": "Airbus A320",
+    "A321": "Airbus A321",
+    "A20N": "Airbus A320neo",
+    "A21N": "Airbus A321neo",
+    "A332": "Airbus A330-200",
+    "A333": "Airbus A330-300",
+    "A338": "Airbus A330-800neo",
+    "A339": "Airbus A330-900neo",
+    "A343": "Airbus A340-300",
+    "A346": "Airbus A340-600",
+    "A359": "Airbus A350-900",
+    "A35K": "Airbus A350-1000",
+    "A388": "Airbus A380-800",
+    "AT43": "ATR 42-300",
+    "AT45": "ATR 42-500",
+    "AT46": "ATR 42-600",
+    "AT72": "ATR 72-200",
+    "AT75": "ATR 72-500",
+    "AT76": "ATR 72-600",
+    "B712": "Boeing 717-200",
+    "B733": "Boeing 737-300",
+    "B734": "Boeing 737-400",
+    "B735": "Boeing 737-500",
+    "B736": "Boeing 737-600",
+    "B737": "Boeing 737-700",
+    "B738": "Boeing 737-800",
+    "B739": "Boeing 737-900",
+    "B37M": "Boeing 737 MAX 7",
+    "B38M": "Boeing 737 MAX 8",
+    "B39M": "Boeing 737 MAX 9",
+    "B3XM": "Boeing 737 MAX 10",
+    "B744": "Boeing 747-400",
+    "B748": "Boeing 747-8",
+    "B752": "Boeing 757-200",
+    "B753": "Boeing 757-300",
+    "B762": "Boeing 767-200",
+    "B763": "Boeing 767-300",
+    "B764": "Boeing 767-400",
+    "B772": "Boeing 777-200",
+    "B773": "Boeing 777-300",
+    "B77L": "Boeing 777-200LR",
+    "B77W": "Boeing 777-300ER",
+    "B788": "Boeing 787-8",
+    "B789": "Boeing 787-9",
+    "B78X": "Boeing 787-10",
+    "BCS1": "Airbus A220-100",
+    "BCS3": "Airbus A220-300",
+    "C152": "Cessna 152",
+    "C172": "Cessna 172 Skyhawk",
+    "C182": "Cessna 182 Skylane",
+    "C206": "Cessna 206 Stationair",
+    "C208": "Cessna 208 Caravan",
+    "C25A": "Cessna Citation CJ2",
+    "C25B": "Cessna Citation CJ3",
+    "C25C": "Cessna Citation CJ4",
+    "CRJ2": "Bombardier CRJ200",
+    "CRJ7": "Bombardier CRJ700",
+    "CRJ9": "Bombardier CRJ900",
+    "CRJX": "Bombardier CRJ1000",
+    "DA40": "Diamond DA40",
+    "DA42": "Diamond DA42 Twin Star",
+    "DA62": "Diamond DA62",
+    "DH8A": "De Havilland Dash 8-100",
+    "DH8B": "De Havilland Dash 8-200",
+    "DH8C": "De Havilland Dash 8-300",
+    "DH8D": "De Havilland Dash 8-400",
+    "E170": "Embraer E170",
+    "E190": "Embraer E190",
+    "E195": "Embraer E195",
+    "E75L": "Embraer E175",
+    "E75S": "Embraer E175",
+    "E290": "Embraer E190-E2",
+    "E295": "Embraer E195-E2",
+    "PA18": "Piper PA-18 Super Cub",
+    "P28A": "Piper PA-28 Cherokee",
+    "P28R": "Piper PA-28R Arrow",
+    "PA34": "Piper PA-34 Seneca",
+    "PA44": "Piper PA-44 Seminole",
+    "PC12": "Pilatus PC-12",
+    "PC24": "Pilatus PC-24",
+    "SR20": "Cirrus SR20",
+    "SR22": "Cirrus SR22",
+}
+
 
 class ConfigurationError(ValueError):
     """Raised for invalid user configuration."""
@@ -76,6 +166,14 @@ def _clean_text(value: Any) -> str | None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def _aircraft_name(aircraft_type: Any, provider_name: Any = None) -> str | None:
+    name = _clean_text(provider_name)
+    if name:
+        return name
+    designator = _clean_text(aircraft_type)
+    return AIRCRAFT_TYPE_NAMES.get(designator.upper()) if designator else None
 
 
 def _float(value: Any) -> float | None:
@@ -219,6 +317,7 @@ def _candidate(
     flight: Any = None,
     registration: Any = None,
     aircraft_type: Any = None,
+    aircraft_name: Any = None,
     operator: Any = None,
     origin: Any = None,
     destination: Any = None,
@@ -253,6 +352,7 @@ def _candidate(
         "flight": flight_text,
         "registration": registration_text,
         "aircraft_type": _clean_text(aircraft_type),
+        "aircraft_name": _clean_text(aircraft_name),
         "operator": _clean_text(operator),
         "origin": _clean_text(origin),
         "destination": _clean_text(destination),
@@ -279,6 +379,7 @@ def normalize_fr24(payload: dict[str, Any]) -> list[dict[str, Any]]:
             flight=row.get("flight"),
             registration=row.get("reg"),
             aircraft_type=row.get("type"),
+            aircraft_name=_coalesce(row.get("aircraft_name"), row.get("description"), row.get("desc")),
             operator=_coalesce(row.get("operating_as"), row.get("painted_as")),
             origin=_coalesce(row.get("orig_iata"), row.get("orig_icao")),
             destination=_coalesce(row.get("dest_iata"), row.get("dest_icao")),
@@ -313,6 +414,7 @@ def normalize_flightaware(payload: dict[str, Any]) -> list[dict[str, Any]]:
             flight=_coalesce(row.get("ident_iata"), row.get("ident")),
             registration=row.get("registration"),
             aircraft_type=row.get("aircraft_type"),
+            aircraft_name=_coalesce(row.get("aircraft_name"), row.get("description"), row.get("desc")),
             origin=_airport_code(row.get("origin")),
             destination=_airport_code(row.get("destination")),
             latitude=position.get("latitude"),
@@ -349,6 +451,7 @@ def normalize_adsblol(payload: dict[str, Any]) -> list[dict[str, Any]]:
             callsign=row.get("flight"),
             registration=row.get("r"),
             aircraft_type=row.get("t"),
+            aircraft_name=row.get("desc"),
             operator=row.get("ownOp"),
             latitude=row.get("lat"),
             longitude=row.get("lon"),
@@ -526,6 +629,8 @@ def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
     origin = candidate.get("origin")
     destination = candidate.get("destination")
     age = candidate.get("age_minutes")
+    aircraft_type = candidate.get("aircraft_type")
+    aircraft_name = _aircraft_name(aircraft_type, candidate.get("aircraft_name"))
     source_labels = {
         "flightradar24": "Flightradar24",
         "flightaware": "FlightAware",
@@ -540,6 +645,7 @@ def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
 
     return {
         **candidate,
+        "aircraft_name": aircraft_name,
         "source_label": source_labels.get(candidate["source"], candidate["source"]),
         "distance_nm": round(candidate["distance_nm"], 1),
         "distance_display": f"{candidate['distance_nm']:.1f} nm",
@@ -562,7 +668,7 @@ def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
         "route": f"{origin} → {destination}" if origin and destination else "Route unavailable",
         "route_available": bool(origin and destination),
         "aircraft_label": " · ".join(
-            value for value in (candidate.get("aircraft_type"), candidate.get("registration")) if value
+            value for value in (aircraft_name or aircraft_type, candidate.get("registration")) if value
         )
         or "Aircraft details unavailable",
         "age_minutes": round(age, 1) if age is not None else None,

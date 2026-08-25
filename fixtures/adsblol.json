@@ -5,6 +5,7 @@
       "flight": "UAL123 ",
       "r": "N123UA",
       "t": "B738",
+      "desc": "BOEING 737-800",
       "ownOp": "United Airlines",
       "alt_baro": 11250,
       "gs": 286.4,
@@ -19,6 +20,7 @@
       "flight": "TEST45 ",
       "r": "N45TEST",
       "t": "C172",
+      "desc": "CESSNA 172 Skyhawk",
       "alt_baro": 3200,
       "gs": 105.0,
       "track": 270.0,
@@ -41,4 +43,3 @@
   "now": 1787688000000,
   "total": 3
 }
-
