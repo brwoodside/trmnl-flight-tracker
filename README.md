@@ -1,9 +1,9 @@
 # TRMNL Overhead Flight Tracker
 
-A current-format TRMNL polling plugin that shows the closest fresh, airborne
-aircraft to a configured latitude/longitude. It refreshes on a requested
-10-minute cadence and runs entirely in TRMNL's polling plus hosted Python
-transform environment—no separate application server is required.
+A current-format TRMNL polling plugin that plots the closest fresh, airborne
+aircraft on a configurable radar scope centered on a latitude/longitude. It
+refreshes on a requested 10-minute cadence and runs entirely in TRMNL's polling
+plus hosted Python transform environment—no separate application server is required.
 
 The provider chain is:
 
@@ -49,24 +49,40 @@ screen contains only the selected aircraft and small diagnostic metadata.
   configured maximum age.
 - Calculate horizontal great-circle distance with the Haversine formula.
 - Choose the smallest horizontal distance, with altitude used only as a stable tie-breaker.
-- Calculate the initial bearing and 16-point compass direction from the configured location.
-- Fall through to the next provider if the current source errors or has no usable aircraft.
+- Calculate the initial bearing and 16-point compass direction from the
+  configured location.
+- Select the smallest enclosing scope range from 1, 2, 5, 10, 20, 50, 100,
+  or 250 nautical miles and plot the contact in a normalized range-and-bearing view.
+- Orient the target with true heading when available, otherwise use ground
+  track. When neither is available, show a position dot instead of implying a direction.
+- Fall through to the next provider if the current source errors or has no
+  usable aircraft.
 
 "Closest" therefore means closest horizontally to the configured point, not
 smallest three-dimensional slant range. This is generally the most intuitive
 interpretation of "overhead" and avoids treating a low, distant aircraft as
 closer than one directly above.
 
-## Display fields
+## Radar scope and display fields
 
-The full view shows flight/callsign, route when available, aircraft name and
-ICAO type code, registration, distance and bearing, altitude, ground speed,
-heading, vertical trend/rate, source, observation age, and number of fresh
-candidates. Smaller mashup views progressively reduce this to the
-highest-signal fields for e-ink. A provider's long aircraft description is
-used when present. A compact built-in lookup expands common ICAO designators
-without making another API request; an unknown type still falls back to its
-code.
+The 800×480 full view uses a 58/42 split between a self-contained vector radar
+scope and a compact telemetry rail. The scope is north-up by default. The
+`map_up_bearing_deg` setting changes the true bearing represented by the top of
+the scope; the true-north marker remains upright and visible at every setting.
+This is a range-and-bearing display, not a geographic basemap, and it makes no
+map-service requests.
+
+![North-up radar scope](docs/screenshots/radar-north-up.png)
+
+The rail shows flight/callsign, airline, route, aircraft name and ICAO type,
+registration, numeric distance and bearing, altitude, ground speed, vertical
+trend/rate, and the selected direction with its semantic label. Provider,
+observation age, and fresh-candidate count appear in the title bar. Smaller
+mashup views retain their previous hierarchy and consume the compatible
+`heading_deg` and `heading_compass` aliases. A provider's long aircraft
+description is used when present. A compact built-in lookup expands common
+ICAO designators without making another API request; an unknown type still
+falls back to its code.
 
 ## Configuration
 
@@ -76,6 +92,7 @@ code.
 | `longitude` | Yes | — | Decimal degrees, -180 to 180. |
 | `location_label` | Yes | `Home` | Short display label. |
 | `radius_nm` | Yes | `20` | 1–250 nautical miles. Smaller values reduce paid API cost and dense-airspace ambiguity. |
+| `map_up_bearing_deg` | Yes | `0` | True bearing shown at the top of the full-view scope, from 0–359 degrees. `0` is north-up and `90` is east-up. |
 | `max_age_minutes` | Yes | `5` | Reject older positions; allowed range 1–60. |
 | `provider_order` | Yes | `auto` | FR24 first, FlightAware first, or ADSB.lol only. |
 | `fr24_api_token` | No | blank | Paid Flightradar24 API token. |
@@ -105,6 +122,7 @@ export TRACKER_LATITUDE="37.7749"
 export TRACKER_LONGITUDE="-122.4194"
 export TRACKER_LOCATION_LABEL="Home"
 export TRACKER_RADIUS_NM="20"
+export TRACKER_MAP_UP_BEARING_DEG="0"
 
 # Optional paid sources:
 export FR24_API_TOKEN="..."

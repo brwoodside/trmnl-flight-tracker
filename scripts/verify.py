@@ -26,6 +26,7 @@ def main():
                 "longitude": "-122.4194",
                 "location_label": "Fixture roof",
                 "radius_nm": "20",
+                "map_up_bearing_deg": "0",
                 "max_age_minutes": "5",
                 "provider_order": "open_only",
                 "fr24_api_token": "",

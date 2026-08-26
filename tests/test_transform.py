@@ -27,6 +27,7 @@ def plugin_input(payload=None, **overrides):
         "longitude": "-122.4194",
         "location_label": "Test roof",
         "radius_nm": "20",
+        "map_up_bearing_deg": "0",
         "max_age_minutes": "5",
         "provider_order": "auto",
         "fr24_api_token": "",
@@ -51,6 +52,48 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(len(boxes), 2)
         self.assertEqual(boxes[0][3], 180.0)
         self.assertEqual(boxes[1][2], -180.0)
+
+    def test_scope_range_uses_smallest_enclosing_step(self):
+        cases = {
+            0: 1,
+            1: 1,
+            1.001: 2,
+            2: 2,
+            2.001: 5,
+            10.001: 20,
+            20.001: 50,
+            100.001: 250,
+            250: 250,
+        }
+        for distance, expected in cases.items():
+            with self.subTest(distance=distance):
+                self.assertEqual(transform.select_scope_range(distance), expected)
+
+    def test_cardinal_scope_coordinates_are_north_up(self):
+        cases = {
+            0: (50, 10),
+            90: (90, 50),
+            180: (50, 90),
+            270: (10, 50),
+        }
+        for bearing, expected in cases.items():
+            with self.subTest(bearing=bearing):
+                self.assertEqual(
+                    transform.scope_coordinates(10, bearing, 10, 0), expected
+                )
+
+    def test_ninety_degree_map_up_rotates_position_and_true_north(self):
+        self.assertEqual(transform.scope_coordinates(10, 90, 10, 90), (50, 10))
+        scope = transform._scope_data(
+            distance_nm=10,
+            bearing_deg=90,
+            direction_deg=180,
+            map_up_bearing_deg=90,
+            fallback_range_nm=20,
+        )
+        self.assertEqual((scope["aircraft_x"], scope["aircraft_y"]), (50, 10))
+        self.assertEqual(scope["aircraft_rotation_deg"], 90)
+        self.assertEqual((scope["north_x"], scope["north_y"]), (10, 50))
 
 
 class NormalizationTests(unittest.TestCase):
@@ -78,6 +121,23 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(normalized[0]["destination"], "SEA")
         self.assertEqual(normalized[0]["registration"], "EI-SIN")
 
+    def test_provider_motion_fields_are_ground_tracks(self):
+        self.assertEqual(transform.normalize_fr24(fixture("fr24.json"))[0]["track_deg"], 219)
+        self.assertEqual(
+            transform.normalize_flightaware(fixture("flightaware.json"))[0]["track_deg"],
+            5,
+        )
+        adsb = transform.normalize_adsblol(fixture("adsblol.json"))[0]
+        self.assertEqual(adsb["track_deg"], 132)
+        self.assertIsNone(adsb["true_heading_deg"])
+
+    def test_adsblol_preserves_true_heading_separately(self):
+        payload = fixture("adsblol.json")
+        payload["ac"][0]["true_heading"] = 126
+        normalized = transform.normalize_adsblol(payload)[0]
+        self.assertEqual(normalized["true_heading_deg"], 126)
+        self.assertEqual(normalized["track_deg"], 132)
+
 
 class RunTests(unittest.TestCase):
     def setUp(self):
@@ -95,6 +155,42 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["aircraft"]["aircraft_label"], "BOEING 737-800 · N123UA")
         self.assertEqual(result["aircraft"]["route"], "Route unavailable")
         self.assertLess(result["aircraft"]["distance_nm"], 1)
+        self.assertEqual(result["scope"]["range_nm"], 1)
+        self.assertEqual(result["aircraft"]["direction_label"], "Ground track")
+        self.assertEqual(result["aircraft"]["heading_deg"], 132)
+
+    def test_true_heading_takes_precedence_over_ground_track(self):
+        payload = fixture("adsblol.json")
+        payload["ac"][0]["true_heading"] = 87
+        result = transform.run(plugin_input(payload, provider_order="open_only"))
+        self.assertEqual(result["aircraft"]["true_heading_deg"], 87)
+        self.assertEqual(result["aircraft"]["track_deg"], 132)
+        self.assertEqual(result["aircraft"]["direction_deg"], 87)
+        self.assertEqual(result["aircraft"]["direction_label"], "True heading")
+        self.assertEqual(result["aircraft"]["heading_deg"], 87)
+
+    def test_custom_map_up_rotates_aircraft_glyph(self):
+        result = transform.run(
+            plugin_input(
+                fixture("adsblol.json"),
+                provider_order="open_only",
+                map_up_bearing_deg="90",
+            )
+        )
+        self.assertEqual(result["scope"]["map_up_bearing_deg"], 90)
+        self.assertEqual(result["scope"]["map_up_compass"], "E")
+        self.assertEqual(result["scope"]["aircraft_rotation_deg"], 42)
+
+    def test_missing_orientation_uses_dot_fallback(self):
+        payload = fixture("adsblol.json")
+        for aircraft in payload["ac"]:
+            aircraft.pop("track", None)
+            aircraft.pop("true_heading", None)
+        result = transform.run(plugin_input(payload, provider_order="open_only"))
+        self.assertIsNone(result["aircraft"]["direction_deg"])
+        self.assertEqual(result["aircraft"]["direction_label"], "Direction unavailable")
+        self.assertIsNone(result["aircraft"]["heading_deg"])
+        self.assertIsNone(result["scope"]["aircraft_rotation_deg"])
 
     def test_fr24_is_preferred_when_token_is_present(self):
         with mock.patch.object(transform, "_fetch_json", return_value=fixture("fr24.json")) as fetch:
@@ -173,6 +269,33 @@ class RunTests(unittest.TestCase):
         result = transform.run(plugin_input({"ac": []}, latitude="north"))
         self.assertEqual(result["status"], "configuration_error")
         self.assertIn("latitude", result["message"])
+
+    def test_map_up_bearing_defaults_to_north(self):
+        data = plugin_input(fixture("adsblol.json"), provider_order="open_only")
+        del data["trmnl"]["plugin_settings"]["custom_fields_values"]["map_up_bearing_deg"]
+        result = transform.run(data)
+        self.assertEqual(result["scope"]["map_up_bearing_deg"], 0)
+        self.assertEqual(result["scope"]["map_up_compass"], "N")
+
+    def test_valid_map_up_bearing_is_accepted(self):
+        result = transform.run(
+            plugin_input(
+                fixture("adsblol.json"),
+                provider_order="open_only",
+                map_up_bearing_deg="359",
+            )
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["scope"]["map_up_bearing_deg"], 359)
+
+    def test_invalid_map_up_bearing_returns_configuration_error(self):
+        for bearing in ("-1", "360", "north"):
+            with self.subTest(bearing=bearing):
+                result = transform.run(
+                    plugin_input(fixture("adsblol.json"), map_up_bearing_deg=bearing)
+                )
+                self.assertEqual(result["status"], "configuration_error")
+                self.assertIn("map_up_bearing_deg", result["message"])
 
     def test_local_trmnlp_env_placeholders_are_resolved(self):
         data = plugin_input(fixture("adsblol.json"))

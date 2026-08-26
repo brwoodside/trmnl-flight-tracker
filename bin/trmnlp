@@ -26,6 +26,7 @@ then
         --env TRACKER_LONGITUDE \
         --env TRACKER_LOCATION_LABEL \
         --env TRACKER_RADIUS_NM \
+        --env TRACKER_MAP_UP_BEARING_DEG \
         --env TRACKER_MAX_AGE_MINUTES \
         --env TRACKER_PROVIDER_ORDER \
         --env FR24_API_TOKEN \
