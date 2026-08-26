@@ -24,6 +24,9 @@ FLIGHTAWARE_URL = "https://aeroapi.flightaware.com/aeroapi/flights/search/advanc
 HTTP_TIMEOUT_SECONDS = 8
 USER_AGENT = "TRMNL-Overhead-Flight-Tracker/1.0"
 EARTH_RADIUS_NM = 3440.065
+SCOPE_RANGES_NM = (1, 2, 5, 10, 20, 50, 100, 250)
+SCOPE_CENTER = 50.0
+SCOPE_RADIUS = 40.0
 
 # Provider descriptions are more specific and always win. This deliberately
 # compact fallback covers common, unambiguous ICAO designators without adding a
@@ -268,6 +271,81 @@ def compass_point(degrees: float | None) -> str:
     return points[int((degrees % 360) / 22.5 + 0.5) % 16]
 
 
+def _direction_deg(value: Any) -> float | None:
+    """Return a provider direction normalized to true degrees."""
+
+    number = _float(value)
+    return number % 360 if number is not None else None
+
+
+def select_scope_range(distance_nm: float) -> int:
+    """Return the smallest supported radar range enclosing a distance."""
+
+    distance = max(0.0, distance_nm)
+    for range_nm in SCOPE_RANGES_NM:
+        if distance <= range_nm:
+            return range_nm
+    return SCOPE_RANGES_NM[-1]
+
+
+def scope_coordinates(
+    distance_nm: float, bearing_deg: float, range_nm: float, map_up_bearing_deg: float
+) -> tuple[float, float]:
+    """Plot range and true bearing in the scope's normalized 0-100 view box."""
+
+    radius = min(max(distance_nm / range_nm, 0.0), 1.0) * SCOPE_RADIUS
+    angle = math.radians(bearing_deg - map_up_bearing_deg)
+    x = SCOPE_CENTER + radius * math.sin(angle)
+    y = SCOPE_CENTER - radius * math.cos(angle)
+    return (round(x, 3), round(y, 3))
+
+
+def _selected_direction(candidate: dict[str, Any]) -> tuple[float | None, str]:
+    true_heading = candidate.get("true_heading_deg")
+    if true_heading is not None:
+        return (true_heading, "True heading")
+    track = candidate.get("track_deg")
+    if track is not None:
+        return (track, "Ground track")
+    return (None, "Direction unavailable")
+
+
+def _scope_data(
+    *,
+    distance_nm: float | None,
+    bearing_deg: float | None,
+    direction_deg: float | None,
+    map_up_bearing_deg: float,
+    fallback_range_nm: float,
+) -> dict[str, Any]:
+    range_nm = select_scope_range(
+        distance_nm if distance_nm is not None else fallback_range_nm
+    )
+    if distance_nm is not None and bearing_deg is not None:
+        aircraft_x, aircraft_y = scope_coordinates(
+            distance_nm, bearing_deg, range_nm, map_up_bearing_deg
+        )
+    else:
+        aircraft_x, aircraft_y = (None, None)
+    north_x, north_y = scope_coordinates(
+        range_nm, 0, range_nm, map_up_bearing_deg
+    )
+    return {
+        "range_nm": range_nm,
+        "aircraft_x": aircraft_x,
+        "aircraft_y": aircraft_y,
+        "aircraft_rotation_deg": (
+            round((direction_deg - map_up_bearing_deg) % 360, 1)
+            if direction_deg is not None
+            else None
+        ),
+        "north_x": north_x,
+        "north_y": north_y,
+        "map_up_bearing_deg": round(map_up_bearing_deg, 1),
+        "map_up_compass": compass_point(map_up_bearing_deg),
+    }
+
+
 def _normalize_longitude(value: float) -> float:
     return ((value + 180) % 360) - 180
 
@@ -309,7 +387,8 @@ def _candidate(
     longitude: Any,
     altitude_ft: Any = None,
     groundspeed_kts: Any = None,
-    heading_deg: Any = None,
+    true_heading_deg: Any = None,
+    track_deg: Any = None,
     vertical_rate_fpm: Any = None,
     vertical_trend: Any = None,
     observed_at: Any = None,
@@ -360,7 +439,8 @@ def _candidate(
         "longitude": lon,
         "altitude_ft": altitude,
         "groundspeed_kts": _float(groundspeed_kts),
-        "heading_deg": _float(heading_deg),
+        "true_heading_deg": _direction_deg(true_heading_deg),
+        "track_deg": _direction_deg(track_deg),
         "vertical_rate_fpm": rate,
         "vertical_trend": trend or "Unknown",
         "observed_at": _iso_time(observed_at),
@@ -387,7 +467,7 @@ def normalize_fr24(payload: dict[str, Any]) -> list[dict[str, Any]]:
             longitude=row.get("lon"),
             altitude_ft=row.get("alt"),
             groundspeed_kts=row.get("gspeed"),
-            heading_deg=row.get("track"),
+            track_deg=row.get("track"),
             vertical_rate_fpm=row.get("vspeed"),
             observed_at=row.get("timestamp"),
         )
@@ -421,7 +501,7 @@ def normalize_flightaware(payload: dict[str, Any]) -> list[dict[str, Any]]:
             longitude=position.get("longitude"),
             altitude_ft=altitude_hundreds * 100 if altitude_hundreds is not None else None,
             groundspeed_kts=position.get("groundspeed"),
-            heading_deg=position.get("heading"),
+            track_deg=position.get("heading"),
             vertical_trend=trend,
             observed_at=position.get("timestamp"),
         )
@@ -457,7 +537,8 @@ def normalize_adsblol(payload: dict[str, Any]) -> list[dict[str, Any]]:
             longitude=row.get("lon"),
             altitude_ft=altitude,
             groundspeed_kts=row.get("gs"),
-            heading_deg=_coalesce(row.get("track"), row.get("true_heading"), row.get("mag_heading")),
+            true_heading_deg=row.get("true_heading"),
+            track_deg=row.get("track"),
             vertical_rate_fpm=_coalesce(row.get("baro_rate"), row.get("geom_rate")),
             observed_at=observed_at,
         )
@@ -594,6 +675,14 @@ def _extract_config(input_data: dict[str, Any]) -> dict[str, Any]:
         1,
         60,
     )
+    map_up_bearing = _required_float(
+        _local_env_field(
+            fields, "map_up_bearing_deg", "TRACKER_MAP_UP_BEARING_DEG", 0
+        ),
+        "map_up_bearing_deg",
+        0,
+        359,
+    )
     provider_order = _clean_text(
         _local_env_field(fields, "provider_order", "TRACKER_PROVIDER_ORDER", "auto")
     ) or "auto"
@@ -611,6 +700,7 @@ def _extract_config(input_data: dict[str, Any]) -> dict[str, Any]:
         or "Observation point",
         "radius_nm": radius,
         "max_age_minutes": max_age,
+        "map_up_bearing_deg": map_up_bearing,
         "provider_order": provider_order,
         "fr24_api_token": _clean_text(
             _local_env_field(fields, "fr24_api_token", "FR24_API_TOKEN")
@@ -624,7 +714,7 @@ def _extract_config(input_data: dict[str, Any]) -> dict[str, Any]:
 def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
     altitude = candidate.get("altitude_ft")
     speed = candidate.get("groundspeed_kts")
-    heading = candidate.get("heading_deg")
+    direction, direction_label = _selected_direction(candidate)
     vertical_rate = candidate.get("vertical_rate_fpm")
     origin = candidate.get("origin")
     destination = candidate.get("destination")
@@ -656,8 +746,22 @@ def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
         "altitude_compact": altitude_compact,
         "groundspeed_kts": round(speed) if speed is not None else None,
         "speed_display": f"{speed:,.0f} kt" if speed is not None else "—",
-        "heading_deg": round(heading) if heading is not None else None,
-        "heading_compass": compass_point(heading),
+        "true_heading_deg": (
+            round(candidate["true_heading_deg"])
+            if candidate.get("true_heading_deg") is not None
+            else None
+        ),
+        "track_deg": (
+            round(candidate["track_deg"])
+            if candidate.get("track_deg") is not None
+            else None
+        ),
+        "direction_deg": round(direction) if direction is not None else None,
+        "direction_compass": compass_point(direction),
+        "direction_label": direction_label,
+        # Compatibility aliases used by the compact layouts.
+        "heading_deg": round(direction) if direction is not None else None,
+        "heading_compass": compass_point(direction),
         "vertical_rate_fpm": round(vertical_rate) if vertical_rate is not None else None,
         "vertical_rate_display": f"{vertical_rate:+,.0f} ft/min" if vertical_rate is not None else "—",
         "vertical_trend_short": {
@@ -686,6 +790,17 @@ def _base_result(config: dict[str, Any] | None, now: datetime) -> dict[str, Any]
         "candidate_count": 0,
         "location_label": config["location_label"] if config else "Flight tracker",
         "search_radius_nm": config["radius_nm"] if config else None,
+        "scope": (
+            _scope_data(
+                distance_nm=None,
+                bearing_deg=None,
+                direction_deg=None,
+                map_up_bearing_deg=config["map_up_bearing_deg"],
+                fallback_range_nm=config["radius_nm"],
+            )
+            if config
+            else None
+        ),
         "updated_at": now.isoformat(timespec="minutes").replace("+00:00", "Z"),
     }
 
@@ -738,13 +853,21 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             )
             continue
 
+        aircraft = _format_aircraft(nearest)
         result.update(
             has_aircraft=True,
             status="ok",
             message="",
             provider_used=provider,
             candidate_count=candidate_count,
-            aircraft=_format_aircraft(nearest),
+            aircraft=aircraft,
+            scope=_scope_data(
+                distance_nm=nearest["distance_nm"],
+                bearing_deg=nearest["bearing_deg"],
+                direction_deg=_selected_direction(nearest)[0],
+                map_up_bearing_deg=config["map_up_bearing_deg"],
+                fallback_range_nm=config["radius_nm"],
+            ),
         )
         result["provider_attempts"].append(
             {"provider": provider, "status": "selected", "detail": f"{candidate_count} candidates"}

@@ -67,6 +67,16 @@ custom_fields:
   default: 20
   placeholder: 20
   group: Location
+- keyname: map_up_bearing_deg
+  field_type: number
+  min: 0
+  max: 359
+  step: 1
+  name: Map-up bearing
+  description: True compass bearing shown at the top of the radar scope.
+  default: 0
+  placeholder: 0
+  group: Location
 - keyname: max_age_minutes
   field_type: number
   min: 1
