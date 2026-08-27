@@ -111,6 +111,12 @@ custom_fields:
   placeholder: Optional
   optional: true
   group: Data providers
+- keyname: author_bio
+  name: About This Plugin
+  field_type: author_bio
+  description: Built by Barrett in NorCal. Identifies overhead flying objects from public and paid data sources. For support, open an issue on GitHub. https://x.com/exploreml
+  category: travel
+  github_url: https://github.com/brwoodside/trmnl-flight-tracker
 name: Overhead Flight Tracker
 description: Closest aircraft overhead
 refresh_interval: 15
