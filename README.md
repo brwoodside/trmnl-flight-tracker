@@ -65,7 +65,7 @@ closer than one directly above.
 
 ## Radar scope and display fields
 
-The 800×480 full view uses a 58/42 split between a self-contained vector radar
+The 800×480 full view uses a 52/48 split between a self-contained vector radar
 scope and a compact telemetry rail. The scope is north-up by default. The
 `map_up_bearing_deg` setting changes the true bearing represented by the top of
 the scope; the true-north marker remains upright and visible at every setting.

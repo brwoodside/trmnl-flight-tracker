@@ -1,8 +1,8 @@
 <style>
   .radar-full {
     display: grid !important;
-    grid-template-columns: 58fr 42fr;
-    gap: 14px;
+    grid-template-columns: 52fr 48fr;
+    gap: 8px;
     flex: 1;
     min-height: 0;
     width: 100%;
@@ -13,14 +13,18 @@
     place-items: center;
     min-width: 0;
     border-right: 2px dotted #000;
-    padding-right: 12px;
+  }
+
+  .radar-scope-shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
   }
 
   .radar-scope {
     display: block;
-    width: 394px;
-    height: 394px;
-    max-width: 100%;
+    width: 100%;
+    height: 100%;
     overflow: visible;
   }
 
@@ -52,8 +56,29 @@
   }
 
   .radar-scope-label {
-    font: 700 3.2px/1 Arial, Helvetica, sans-serif;
+    position: absolute;
+    z-index: 1;
+    font: 700 13px/1 Arial, Helvetica, sans-serif;
     letter-spacing: .3px;
+    white-space: nowrap;
+  }
+
+  .radar-scope-label--up {
+    top: 0;
+    left: 0;
+  }
+
+  .radar-scope-label--location {
+    bottom: 0;
+    left: 0;
+    max-width: 58%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .radar-scope-label--range {
+    right: 0;
+    bottom: 0;
   }
 
   .radar-north-disc {
@@ -179,27 +204,27 @@
   .radar-metric-value {
     display: block;
     overflow: hidden;
-    font: 500 29px/1 Arial, Helvetica, sans-serif;
+    font: 500 33px/1 Arial, Helvetica, sans-serif;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
   .radar-position .radar-metric-value {
-    font: 500 30px/1 Arial, Helvetica, sans-serif;
+    font: 500 35px/1 Arial, Helvetica, sans-serif;
   }
 
   .radar-direction .radar-metric-value {
-    font: 500 25px/1 Arial, Helvetica, sans-serif;
+    font: 500 30px/1 Arial, Helvetica, sans-serif;
   }
 
   .radar-bearing .radar-metric-value {
-    font: 500 26px/1 Arial, Helvetica, sans-serif;
+    font: 500 31px/1 Arial, Helvetica, sans-serif;
   }
 
   .radar-metric-note {
     display: block;
     overflow: hidden;
-    font: 400 12px/1.05 Arial, Helvetica, sans-serif;
+    font: 400 14px/1.05 Arial, Helvetica, sans-serif;
     font-variant-numeric: tabular-nums;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -231,7 +256,12 @@
 {% if has_aircraft or status == "no_aircraft" %}
   <div class="layout radar-full">
     <div class="radar-panel">
-      <svg class="radar-scope" viewBox="0 0 100 100" role="img" aria-labelledby="radar-title radar-description">
+      <div class="radar-scope-shell">
+        <span class="radar-scope-label radar-scope-label--up">UP {{ scope.map_up_compass }} · {{ scope.map_up_bearing_deg }}°T</span>
+        <span class="radar-scope-label radar-scope-label--location">{{ location_label }}</span>
+        <span class="radar-scope-label radar-scope-label--range">RANGE {{ scope.range_nm }} NM</span>
+
+        <svg class="radar-scope" viewBox="3.5 3.5 93 93" role="img" aria-labelledby="radar-title radar-description">
         <title id="radar-title">Aircraft range and bearing scope</title>
         {% if has_aircraft %}
           <desc id="radar-description">{{ aircraft.identifier }} is {{ aircraft.distance_display }} {{ aircraft.bearing_compass }} of {{ location_label }}.</desc>
@@ -246,10 +276,6 @@
 
         <path class="radar-tick" d="M50 10v4 M90 50h-4 M50 90v-4 M10 50h4" />
         <path class="radar-center-mark" d="M46.5 50h7 M50 46.5v7" />
-
-        <text class="radar-scope-label" x="50" y="3.5" text-anchor="middle">UP {{ scope.map_up_compass }} · {{ scope.map_up_bearing_deg }}°T</text>
-        <text class="radar-scope-label" x="10" y="99" text-anchor="start">{{ location_label | truncate: 24 }}</text>
-        <text class="radar-scope-label" x="90" y="99" text-anchor="end">RANGE {{ scope.range_nm }} NM</text>
 
         {% if has_aircraft %}
           {% if scope.aircraft_rotation_deg != nil %}
@@ -267,7 +293,8 @@
           <circle class="radar-north-disc" cx="0" cy="0" r="2.5" />
           <text class="radar-north-label" x="0" y=".2">N</text>
         </g>
-      </svg>
+        </svg>
+      </div>
     </div>
 
     {% if has_aircraft %}
