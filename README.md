@@ -50,8 +50,12 @@ already-polled ADSB.lol fallback and formatting. Slow paid responses can therefo
 cause fallback even if the provider would eventually succeed. Without credentials,
 paid requests and workers are skipped entirely.
 
-No provider response is written to persistent storage by this project. Each
-screen contains only the selected aircraft and small diagnostic metadata.
+The transform retains one recent route in TRMNL's per-install
+[saved state](https://help.trmnl.com/en/articles/16777795-saved-state), using
+`input.trmnl.state` and the returned `trmnl_state` object. Only the flight
+callsign, registration (when supplied), airports, route provider, and original
+observation time are stored; no raw responses, positions, or credentials are
+saved. Each screen contains the selected aircraft and small diagnostic metadata.
 
 ## Selection logic
 
@@ -69,6 +73,22 @@ screen contains only the selected aircraft and small diagnostic metadata.
   track. When neither is available, show a position dot instead of implying a direction.
 - Fall through to the next provider if the current source errors or has no
   usable aircraft.
+- If the selected provider has an incomplete route, reuse the last complete route
+  from the same or a higher-priority provider for the same ICAO flight callsign.
+  Callsigns are case-insensitive; conflicting registrations or known endpoints
+  prevent reuse. Tail-number callsigns never qualify, and an available live
+  route always wins. Current position and telemetry still come from the selected
+  provider; `aircraft.route_source` and `aircraft.route_retained` identify the
+  route's provenance.
+- Retained routes expire two hours after their original observation, even during
+  repeated fallback refreshes. Empty/error refreshes preserve an unexpired route.
+  Only the most recent complete route is retained, so this is not a flight-history
+  cache. Without a prior qualifying route, the display still says “Route unavailable.”
+
+Saved state starts empty after installation. The hosted transform must first see
+one complete route before it can retain it across a provider switch. Local
+`trmnlp` previews do not currently carry state between builds; the unit tests
+replay the hosted `trmnl_state` → `trmnl.state` contract explicitly.
 
 "Closest" therefore means closest horizontally to the configured point, not
 smallest three-dimensional slant range. This is generally the most intuitive
@@ -253,10 +273,13 @@ results also have a processing charge. Review the current
 [FR24 credit table](https://fr24api.flightradar24.com/docs/credit-overview)
 before enabling a 10-minute cadence.
 
-FR24 says accumulated API data must be deleted after 30 days. This plugin does
-not build a history or cache raw responses, which keeps it comfortably within
-that ceiling; users who add persistence must implement the documented
-[storage rule](https://fr24api.flightradar24.com/docs/storage-rules). The FR24
+The plugin does not build a history or cache raw responses. Its single saved
+route expires after two hours and is removed on the next successful state write.
+If refreshes stop or TRMNL skips a state write after a polling failure, the host
+may retain the old object, but the transform will not reuse an expired route.
+Use **Clear Saved State** when retiring the plugin, and follow the provider's
+[storage rule](https://fr24api.flightradar24.com/docs/storage-rules) for retained
+data. The FR24
 sandbox returns static data and ignores query bounds, so it is useful for schema
 testing but not for local nearest-aircraft verification.
 
