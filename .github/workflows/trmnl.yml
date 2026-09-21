@@ -19,7 +19,8 @@ jobs:
         with:
           ruby-version: "4.0"
       - run: gem install trmnl_preview
-      - run: trmnlp lint
+      - run: ruby scripts/verify_form.rb
+      - run: ./bin/trmnlp lint
 
   push:
     needs: test-and-lint
@@ -34,4 +35,3 @@ jobs:
       - run: trmnlp push --force
         env:
           TRMNL_API_KEY: ${{ secrets.TRMNL_API_KEY }}
-

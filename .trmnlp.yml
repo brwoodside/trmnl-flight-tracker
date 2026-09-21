@@ -6,8 +6,7 @@ watch:
   - src
 
 custom_fields:
-  latitude: "{{ env.TRACKER_LATITUDE | default: 37.7749 }}"
-  longitude: "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+  lat_lon: "{{ env.TRACKER_LATITUDE | default: 37.7749 }},{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
   location_label: "{{ env.TRACKER_LOCATION_LABEL | default: San Francisco }}"
   radius_nm: "{{ env.TRACKER_RADIUS_NM | default: 20 }}"
   map_up_bearing_deg: "{{ env.TRACKER_MAP_UP_BEARING_DEG | default: 0 }}"

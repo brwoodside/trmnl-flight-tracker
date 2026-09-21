@@ -22,8 +22,7 @@ def main():
     payload["trmnl"] = {
         "plugin_settings": {
             "custom_fields_values": {
-                "latitude": "37.7749",
-                "longitude": "-122.4194",
+                "lat_lon": "37.7749,-122.4194",
                 "location_label": "Fixture roof",
                 "radius_nm": "20",
                 "map_up_bearing_deg": "0",

@@ -65,14 +65,23 @@ closer than one directly above.
 
 ## Radar scope and display fields
 
-The 800×480 full view uses a 52/48 split between a self-contained vector radar
-scope and a compact telemetry rail. The scope is north-up by default. The
+The full view places a vector radar scope next to a telemetry panel on
+landscape screens and stacks them in portrait. TRMNL Framework classes handle
+all layout, typography, spacing, and dividers, with larger text on TRMNL X.
+Only the radar's SVG geometry has custom CSS; its north marker uses the
+Framework font. The scope is north-up by default. The
 `map_up_bearing_deg` setting changes the true bearing represented by the top of
 the scope; the true-north marker remains upright and visible at every setting.
 This is a range-and-bearing display, not a geographic basemap, and it makes no
 map-service requests.
 
 ![North-up radar scope](docs/screenshots/radar-north-up.png)
+
+Also preview the [TRMNL X landscape](docs/screenshots/radar-x-landscape.png)
+and [TRMNL X portrait](docs/screenshots/radar-x-portrait.png) layouts. They use
+the Framework's `lg:` typography and `portrait:` layout classes; portrait
+telemetry reflows into three columns. Values use Framework fitting and text
+clamping instead of custom font sizes.
 
 The rail shows flight/callsign, airline, route, aircraft name and ICAO type,
 registration, numeric distance and bearing, altitude, ground speed, vertical
@@ -88,8 +97,7 @@ falls back to its code.
 
 | Setting | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `latitude` | Yes | — | Decimal degrees, -90 to 90. |
-| `longitude` | Yes | — | Decimal degrees, -180 to 180. |
+| `lat_lon` | Yes | — | Location picker: search a city, address, or postal code, or enter `latitude,longitude`. Latitude must be -90 to 90 and longitude -180 to 180. |
 | `location_label` | Yes | `Home` | Short display label. |
 | `radius_nm` | Yes | `20` | 1–250 nautical miles. Smaller values reduce paid API cost and dense-airspace ambiguity. |
 | `map_up_bearing_deg` | Yes | `0` | True bearing shown at the top of the full-view scope, from 0–359 degrees. `0` is north-up and `90` is east-up. |
@@ -97,7 +105,15 @@ falls back to its code.
 | `provider_order` | Yes | `auto` | FR24 first, FlightAware first, or ADSB.lol only. |
 | `fr24_api_token` | No | blank | Paid Flightradar24 API token. |
 | `flightaware_api_key` | No | blank | FlightAware AeroAPI v4 key. |
-| `refresh_interval` | Project setting | `10` | Minutes, in `src/settings.yml`. See cadence caveat below. |
+| `refresh_interval` | Project setting | `15` | Minutes, in `src/settings.yml`. See cadence caveat below. |
+
+The observation point uses TRMNL's
+[`lat_lon` location picker](https://help.trmnl.com/en/articles/10513740-custom-plugin-form-builder).
+The polling URL and Python transform read the same comma-separated coordinates.
+Existing saved `latitude`/`longitude` values are still accepted when `lat_lon`
+is absent. When upgrading, select and save your observation point in the new
+picker; it takes precedence over legacy fields. Maximum position age is always
+visible, outside the collapsible groups.
 
 The API-key fields use TRMNL's `password` field type. They are delivered only
 to the hosted transform and then to the provider's fixed HTTPS origin. Do not
@@ -132,6 +148,8 @@ export FLIGHTAWARE_AEROAPI_KEY="..."
 ```
 
 Open `http://localhost:4567`. With no paid keys, the preview uses ADSB.lol.
+The existing latitude/longitude environment variables populate the combined
+location field in `.trmnlp.yml`.
 You can also build static HTML (and PNGs when Firefox/ImageMagick are present):
 
 ```bash
@@ -139,6 +157,11 @@ You can also build static HTML (and PNGs when Firefox/ImageMagick are present):
 ./bin/trmnlp build
 ./bin/trmnlp build --png
 ```
+
+Use the repository's `./bin/trmnlp` wrapper for local checks. It adds only the
+documented `lat_lon` type to the older preview CLI's form-field allowlist until
+upstream includes it; every other lint check remains enabled. CI also verifies
+the form schema and polling URL with `ruby scripts/verify_form.rb`.
 
 ## Deploy to TRMNL
 
@@ -161,9 +184,9 @@ Create or update a private plugin with:
 ./bin/trmnlp push
 ```
 
-Then set latitude, longitude, radius, and optional provider keys in the TRMNL
+Then select the observation point, radius, and optional provider keys in the TRMNL
 plugin form. Add the plugin to a playlist and ensure the device/playlist cadence
-is also 10 minutes or faster. The included GitHub Actions workflow tests and
+matches your desired refresh interval. The included GitHub Actions workflow tests and
 lints pull requests and can push `main` when the repository has a
 `TRMNL_API_KEY` secret.
 
@@ -264,11 +287,11 @@ fallbacks until they can be added and tested.
 
 ### Refresh cadence and privacy
 
-`refresh_interval: 10` is the requested plugin minimum. TRMNL currently applies
+`refresh_interval: 15` is the requested plugin minimum. TRMNL currently applies
 account, device, playlist, mashup, and plugin limits together: standard
 accounts are generally capped at a 15-minute minimum, while TRMNL+ can go as
 low as 5 minutes. A standard account may therefore run this project every 15
-minutes even though the plugin requests 10.
+minutes with this configuration.
 
 Every refresh sends the configured point and radius to ADSB.lol; when enabled,
 the transform also sends an enclosing bounding box to FR24 and/or FlightAware.

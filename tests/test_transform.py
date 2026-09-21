@@ -23,8 +23,7 @@ def fixture(name):
 
 def plugin_input(payload=None, **overrides):
     fields = {
-        "latitude": "37.7749",
-        "longitude": "-122.4194",
+        "lat_lon": "37.7749,-122.4194",
         "location_label": "Test roof",
         "radius_nm": "20",
         "map_up_bearing_deg": "0",
@@ -354,7 +353,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["status"], "no_aircraft")
 
     def test_invalid_location_returns_displayable_error(self):
-        result = transform.run(plugin_input({"ac": []}, latitude="north"))
+        result = transform.run(plugin_input({"ac": []}, lat_lon="north,-122.4194"))
         self.assertEqual(result["status"], "configuration_error")
         self.assertIn("latitude", result["message"])
 
@@ -388,8 +387,10 @@ class RunTests(unittest.TestCase):
     def test_local_trmnlp_env_placeholders_are_resolved(self):
         data = plugin_input(fixture("adsblol.json"))
         fields = data["trmnl"]["plugin_settings"]["custom_fields_values"]
-        fields["latitude"] = "{{ env.TRACKER_LATITUDE | default: 37.7749 }}"
-        fields["longitude"] = "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+        fields["lat_lon"] = (
+            "{{ env.TRACKER_LATITUDE | default: 37.7749 }},"
+            "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+        )
         fields["fr24_api_token"] = "{{ env.FR24_API_TOKEN }}"
         with mock.patch.dict(
             transform.os.environ,
@@ -403,6 +404,48 @@ class RunTests(unittest.TestCase):
             result = transform.run(data)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["provider_used"], "adsblol")
+
+
+class LocationTests(unittest.TestCase):
+    def test_location_picker_coordinates_take_precedence_over_legacy_fields(self):
+        config = transform._extract_config(plugin_input(
+            lat_lon=" 47.6062, -122.3321 ", latitude="37.7749", longitude="-122.4194"
+        ))
+        self.assertEqual((config["latitude"], config["longitude"]), (47.6062, -122.3321))
+
+    def test_location_picker_accepts_zero_and_boundary_coordinates(self):
+        for latitude, longitude in ((0, 0), (-90, -180), (90, 180)):
+            with self.subTest(latitude=latitude, longitude=longitude):
+                config = transform._extract_config(plugin_input(lat_lon=f"{latitude},{longitude}"))
+                self.assertEqual((config["latitude"], config["longitude"]), (latitude, longitude))
+
+    def test_invalid_location_picker_values_do_not_fall_back_to_legacy_location(self):
+        for value in (None, "", " ", "37.7", ",", "37.7,", ",-122.4", "1,2,3",
+                      "city,address", "91,0", "0,-181", "nan,0", "0,inf", [37.7, -122.4]):
+            with self.subTest(value=value):
+                result = transform.run(plugin_input(
+                    {"ac": []}, lat_lon=value, latitude="37.7", longitude="-122.4"
+                ))
+                self.assertEqual(result["status"], "configuration_error")
+
+    def test_legacy_coordinates_remain_supported(self):
+        data = plugin_input(latitude="47.6062", longitude="-122.3321")
+        del data["trmnl"]["plugin_settings"]["custom_fields_values"]["lat_lon"]
+        config = transform._extract_config(data)
+        self.assertEqual((config["latitude"], config["longitude"]), (47.6062, -122.3321))
+
+    def test_local_picker_template_uses_environment_and_sample_defaults(self):
+        data = plugin_input(lat_lon=(
+            "{{ env.TRACKER_LATITUDE | default: 37.7749 }},"
+            "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+        ))
+        for env, expected in (({}, (37.7749, -122.4194)),
+                              ({"TRACKER_LATITUDE": "0", "TRACKER_LONGITUDE": "0"}, (0, 0)),
+                              ({"TRACKER_LATITUDE": "47.6062", "TRACKER_LONGITUDE": "-122.3321"},
+                               (47.6062, -122.3321))):
+            with self.subTest(env=env), mock.patch.dict(transform.os.environ, env, clear=True):
+                config = transform._extract_config(data)
+                self.assertEqual((config["latitude"], config["longitude"]), expected)
 
 
 if __name__ == "__main__":

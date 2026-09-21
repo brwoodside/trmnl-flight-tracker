@@ -742,14 +742,26 @@ def _extract_config(input_data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(fields, dict):
         fields = {}
 
+    # The location picker stores a comma-separated pair. Legacy installations
+    # can still supply separate fields until their location is saved again.
+    coordinates = fields
+    if "lat_lon" in fields:
+        location = fields["lat_lon"]
+        if not isinstance(location, str) or len(location.split(",")) != 2:
+            raise ConfigurationError("lat_lon must contain latitude,longitude")
+        lat, lon = location.split(",")
+        if not lat.strip() or not lon.strip():
+            raise ConfigurationError("lat_lon must contain latitude,longitude")
+        coordinates = {"latitude": lat.strip(), "longitude": lon.strip()}
+
     latitude = _required_float(
-        _local_env_field(fields, "latitude", "TRACKER_LATITUDE", 37.7749),
+        _local_env_field(coordinates, "latitude", "TRACKER_LATITUDE", 37.7749),
         "latitude",
         -90,
         90,
     )
     longitude = _required_float(
-        _local_env_field(fields, "longitude", "TRACKER_LONGITUDE", -122.4194),
+        _local_env_field(coordinates, "longitude", "TRACKER_LONGITUDE", -122.4194),
         "longitude",
         -180,
         180,
