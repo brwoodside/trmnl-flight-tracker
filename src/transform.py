@@ -12,6 +12,7 @@ runtime does not install this project's development dependencies.
 import json
 import math
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,6 +28,68 @@ EARTH_RADIUS_NM = 3440.065
 SCOPE_RANGES_NM = (1, 2, 5, 10, 20, 50, 100, 250)
 SCOPE_CENTER = 50.0
 SCOPE_RADIUS = 40.0
+
+# Common ICAO operator designators, checked against the FAA's company decode:
+# https://www.faa.gov/air_traffic/publications/atpubs/cnt_html/chap3_section_3.html
+# Use familiar display names; regional operators stay distinct from marketing
+# carriers. Keep this in the transform because TRMNL uploads it as one file.
+AIRLINE_NAMES = {
+    "AAL": "American Airlines",
+    "AAR": "Asiana Airlines",
+    "AAY": "Allegiant Air",
+    "ACA": "Air Canada",
+    "AFR": "Air France",
+    "AIC": "Air India",
+    "AMX": "Aeromexico",
+    "ANA": "All Nippon Airways",
+    "ANZ": "Air New Zealand",
+    "ASA": "Alaska Airlines",
+    "ASH": "Mesa Airlines",
+    "BAW": "British Airways",
+    "CCA": "Air China",
+    "CES": "China Eastern Airlines",
+    "CFG": "Condor",
+    "CPA": "Cathay Pacific",
+    "CSN": "China Southern Airlines",
+    "DAL": "Delta Air Lines",
+    "DLH": "Lufthansa",
+    "EIN": "Aer Lingus",
+    "ENY": "Envoy Air",
+    "EVA": "EVA Air",
+    "FDX": "FedEx Express",
+    "FFT": "Frontier Airlines",
+    "FIN": "Finnair",
+    "HAL": "Hawaiian Airlines",
+    "IBE": "Iberia",
+    "ICE": "Icelandair",
+    "JAL": "Japan Airlines",
+    "JBU": "JetBlue Airways",
+    "JZA": "Jazz Aviation",
+    "KAL": "Korean Air",
+    "KLM": "KLM Royal Dutch Airlines",
+    "LOT": "LOT Polish Airlines",
+    "LXJ": "Flexjet",
+    "NKS": "Spirit Airlines",
+    "PDT": "Piedmont Airlines",
+    "QFA": "Qantas",
+    "QTR": "Qatar Airways",
+    "QXE": "Horizon Air",
+    "RPA": "Republic Airways",
+    "RYR": "Ryanair",
+    "SAS": "Scandinavian Airlines",
+    "SIA": "Singapore Airlines",
+    "SKW": "SkyWest Airlines",
+    "SWA": "Southwest Airlines",
+    "SWR": "Swiss International Air Lines",
+    "TAP": "TAP Air Portugal",
+    "THY": "Turkish Airlines",
+    "UAE": "Emirates",
+    "UAL": "United Airlines",
+    "UPS": "UPS Airlines",
+    "VIR": "Virgin Atlantic",
+    "VOI": "Volaris",
+    "WJA": "WestJet",
+}
 
 # Provider descriptions are more specific and always win. This deliberately
 # compact fallback covers common, unambiguous ICAO designators without adding a
@@ -177,6 +240,31 @@ def _aircraft_name(aircraft_type: Any, provider_name: Any = None) -> str | None:
         return name
     designator = _clean_text(aircraft_type)
     return AIRCRAFT_TYPE_NAMES.get(designator.upper()) if designator else None
+
+
+def _airline_name(
+    operator: Any,
+    callsign: Any,
+    registration: Any,
+    fallback_operator: Any = None,
+) -> str | None:
+    """Prefer provider identity, then a recognized ICAO flight callsign, then livery."""
+    name = _clean_text(operator)
+    if name:
+        # An unknown explicit code still beats an inferred carrier.
+        return AIRLINE_NAMES.get(name.upper(), name)
+
+    flight = (_clean_text(callsign) or "").upper()
+    tail = (_clean_text(registration) or "").upper()
+    # Require a numeric flight-number start and an ADS-B-sized identifier.
+    # Never derive an airline from a tail number, IATA flight, or bare prefix.
+    if flight != tail and re.fullmatch(r"[A-Z]{3}[0-9][A-Z0-9]{0,4}", flight):
+        name = AIRLINE_NAMES.get(flight[:3])
+        if name:
+            return name
+
+    fallback = _clean_text(fallback_operator)
+    return AIRLINE_NAMES.get(fallback.upper(), fallback) if fallback else None
 
 
 def _float(value: Any) -> float | None:
@@ -398,6 +486,7 @@ def _candidate(
     aircraft_type: Any = None,
     aircraft_name: Any = None,
     operator: Any = None,
+    fallback_operator: Any = None,
     origin: Any = None,
     destination: Any = None,
 ) -> dict[str, Any] | None:
@@ -432,7 +521,7 @@ def _candidate(
         "registration": registration_text,
         "aircraft_type": _clean_text(aircraft_type),
         "aircraft_name": _clean_text(aircraft_name),
-        "operator": _clean_text(operator),
+        "operator": _airline_name(operator, callsign_text, registration_text, fallback_operator),
         "origin": _clean_text(origin),
         "destination": _clean_text(destination),
         "latitude": lat,
@@ -460,7 +549,8 @@ def normalize_fr24(payload: dict[str, Any]) -> list[dict[str, Any]]:
             registration=row.get("reg"),
             aircraft_type=row.get("type"),
             aircraft_name=_coalesce(row.get("aircraft_name"), row.get("description"), row.get("desc")),
-            operator=_coalesce(row.get("operating_as"), row.get("painted_as")),
+            operator=row.get("operating_as"),
+            fallback_operator=row.get("painted_as"),
             origin=_coalesce(row.get("orig_iata"), row.get("orig_icao")),
             destination=_coalesce(row.get("dest_iata"), row.get("dest_icao")),
             latitude=row.get("lat"),
@@ -494,6 +584,7 @@ def normalize_flightaware(payload: dict[str, Any]) -> list[dict[str, Any]]:
             flight=_coalesce(row.get("ident_iata"), row.get("ident")),
             registration=row.get("registration"),
             aircraft_type=row.get("aircraft_type"),
+            operator=_coalesce(_clean_text(row.get("operator_icao")), row.get("operator")),
             aircraft_name=_coalesce(row.get("aircraft_name"), row.get("description"), row.get("desc")),
             origin=_airport_code(row.get("origin")),
             destination=_airport_code(row.get("destination")),
@@ -651,14 +742,26 @@ def _extract_config(input_data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(fields, dict):
         fields = {}
 
+    # The location picker stores a comma-separated pair. Legacy installations
+    # can still supply separate fields until their location is saved again.
+    coordinates = fields
+    if "lat_lon" in fields:
+        location = fields["lat_lon"]
+        if not isinstance(location, str) or len(location.split(",")) != 2:
+            raise ConfigurationError("lat_lon must contain latitude,longitude")
+        lat, lon = location.split(",")
+        if not lat.strip() or not lon.strip():
+            raise ConfigurationError("lat_lon must contain latitude,longitude")
+        coordinates = {"latitude": lat.strip(), "longitude": lon.strip()}
+
     latitude = _required_float(
-        _local_env_field(fields, "latitude", "TRACKER_LATITUDE", 37.7749),
+        _local_env_field(coordinates, "latitude", "TRACKER_LATITUDE", 37.7749),
         "latitude",
         -90,
         90,
     )
     longitude = _required_float(
-        _local_env_field(fields, "longitude", "TRACKER_LONGITUDE", -122.4194),
+        _local_env_field(coordinates, "longitude", "TRACKER_LONGITUDE", -122.4194),
         "longitude",
         -180,
         180,

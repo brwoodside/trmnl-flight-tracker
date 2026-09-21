@@ -6,7 +6,8 @@ static_data: ''
 polling_verb: get
 framework_version: latest
 serverless_language: python
-polling_url: https://api.adsb.lol/v2/point/{{ latitude }}/{{ longitude }}/{{ radius_nm }}
+polling_url: >-
+  https://api.adsb.lol/v2/point/{% if lat_lon != blank %}{{ lat_lon | split: ',' | first | strip }}/{{ lat_lon | split: ',' | last | strip }}{% else %}{{ latitude }}/{{ longitude }}{% endif %}/{{ radius_nm }}
 polling_headers: Accept=application/json
 polling_body: ''
 id: 456500
@@ -31,23 +32,11 @@ oauth_expiry_field_name: ''
 oauth_expiry_strategy: ''
 oauth_fixed_expiry_ms: ''
 custom_fields:
-- keyname: latitude
-  field_type: number
-  step: 1.0e-06
-  min: -90
-  max: 90
-  name: Latitude
-  description: Decimal latitude of the observation point.
-  placeholder: 37.7749
-  group: Location
-- keyname: longitude
-  field_type: number
-  step: 1.0e-06
-  min: -180
-  max: 180
-  name: Longitude
-  description: Decimal longitude of the observation point.
-  placeholder: -122.4194
+- keyname: lat_lon
+  field_type: lat_lon
+  name: Observation point
+  description: Search for a city, address, or postal code, or enter latitude,longitude.
+  placeholder: 37.7749,-122.4194
   group: Location
 - keyname: location_label
   field_type: string
@@ -86,7 +75,6 @@ custom_fields:
   description: Ignore stale aircraft positions older than this many minutes.
   default: 5
   placeholder: 5
-  group: Data quality
 - keyname: provider_order
   field_type: select
   name: Provider preference

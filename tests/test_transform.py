@@ -23,8 +23,7 @@ def fixture(name):
 
 def plugin_input(payload=None, **overrides):
     fields = {
-        "latitude": "37.7749",
-        "longitude": "-122.4194",
+        "lat_lon": "37.7749,-122.4194",
         "location_label": "Test roof",
         "radius_nm": "20",
         "map_up_bearing_deg": "0",
@@ -97,6 +96,92 @@ class GeometryTests(unittest.TestCase):
 
 
 class NormalizationTests(unittest.TestCase):
+    def test_adsblol_resolves_airlines_without_owner_metadata(self):
+        cases = {
+            "UAL1083 ": "United Airlines",
+            " asa924 ": "Alaska Airlines",
+            "SKW410Z": "SkyWest Airlines",
+            "FDX123": "FedEx Express",
+        }
+        for callsign, expected in cases.items():
+            with self.subTest(callsign=callsign):
+                payload = fixture("adsblol.json")
+                self.assertNotIn("ownOp", payload["ac"][0])
+                payload["ac"][0]["flight"] = callsign
+                self.assertEqual(transform.normalize_adsblol(payload)[0]["operator"], expected)
+
+    def test_adsblol_preserves_provider_name_over_callsign(self):
+        payload = fixture("adsblol.json")
+        payload["ac"][0]["ownOp"] = "  Custom Aircraft Operator  "
+        self.assertEqual(
+            transform.normalize_adsblol(payload)[0]["operator"], "Custom Aircraft Operator"
+        )
+
+    def test_blank_owner_metadata_still_uses_callsign(self):
+        payload = fixture("adsblol.json")
+        payload["ac"][0]["ownOp"] = "  "
+        self.assertEqual(transform.normalize_adsblol(payload)[0]["operator"], "United Airlines")
+
+    def test_unrecognized_or_nonflight_callsigns_remain_unavailable(self):
+        for callsign in (None, "", "  ", "N123UA", "C-FABC", "ZZZ123", "UA123", "UAL",
+                         "UALTEST", "UAL123456", "UAL123!", "UAL 123", "UAL１２３"):
+            with self.subTest(callsign=callsign):
+                payload = fixture("adsblol.json")
+                payload["ac"][0]["flight"] = callsign
+                self.assertIsNone(transform.normalize_adsblol(payload)[0]["operator"])
+
+    def test_callsign_equal_to_registration_is_not_an_airline(self):
+        payload = fixture("adsblol.json")
+        payload["ac"][0].update(flight="ual123 ", r="UAL123")
+        self.assertIsNone(transform.normalize_adsblol(payload)[0]["operator"])
+
+    def test_fr24_expands_operator_code(self):
+        payload = fixture("fr24.json")
+        payload["data"][0]["operating_as"] = " sas "
+        self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], "Scandinavian Airlines")
+
+    def test_fr24_operating_airline_wins_over_callsign_and_livery(self):
+        payload = fixture("fr24.json")
+        payload["data"][0].update(operating_as="SKW", painted_as="UAL", callsign="UAL123")
+        self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], "SkyWest Airlines")
+
+    def test_fr24_callsign_wins_over_livery_when_operator_missing(self):
+        payload = fixture("fr24.json")
+        payload["data"][0].update(operating_as=" ", painted_as="UAL", callsign="SKW410Z")
+        self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], "SkyWest Airlines")
+
+    def test_fr24_livery_is_last_resort(self):
+        payload = fixture("fr24.json")
+        payload["data"][0].update(operating_as=None, callsign=None)
+        self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], "Scandinavian Airlines")
+
+    def test_fr24_preserves_unknown_explicit_operator(self):
+        for operator in ("ZZZ", "Custom Airline"):
+            with self.subTest(operator=operator):
+                payload = fixture("fr24.json")
+                payload["data"][0]["operating_as"] = operator
+                self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], operator)
+
+    def test_flightaware_resolves_callsign_without_operator(self):
+        self.assertEqual(
+            transform.normalize_flightaware(fixture("flightaware.json"))[0]["operator"],
+            "Alaska Airlines",
+        )
+
+    def test_flightaware_prefers_explicit_operator_over_callsign(self):
+        for fields in ({"operator_icao": "SKW", "operator": "OO"},
+                       {"operator": "SKW"},
+                       {"operator_icao": " ", "operator": "SKW"}):
+            with self.subTest(fields=fields):
+                payload = fixture("flightaware.json")
+                payload["flights"][0].update(fields)
+                self.assertEqual(transform.normalize_flightaware(payload)[0]["operator"], "SkyWest Airlines")
+
+    def test_flightaware_preserves_supplied_name(self):
+        payload = fixture("flightaware.json")
+        payload["flights"][0]["operator"] = "Custom Airline"
+        self.assertEqual(transform.normalize_flightaware(payload)[0]["operator"], "Custom Airline")
+
     def test_adsblol_ignores_ground_aircraft(self):
         normalized = transform.normalize_adsblol(fixture("adsblol.json"))
         self.assertEqual(len(normalized), 2)
@@ -201,6 +286,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["aircraft"]["route"], "SFO → SEA")
         request_headers = fetch.call_args.args[1]
         self.assertEqual(request_headers["Authorization"], "Bearer fr24-secret")
+        self.assertEqual(result["aircraft"]["operator"], "Scandinavian Airlines")
         self.assertEqual(request_headers["Accept-Version"], "v1")
 
     def test_flightaware_is_used_after_fr24_error(self):
@@ -218,6 +304,7 @@ class RunTests(unittest.TestCase):
                 )
             )
         self.assertEqual(result["provider_used"], "flightaware")
+        self.assertEqual(result["aircraft"]["operator"], "Alaska Airlines")
         self.assertEqual(result["aircraft"]["identifier"], "AS331")
         self.assertEqual(result["aircraft"]["aircraft_name"], "Boeing 737 MAX 9")
         self.assertEqual(result["aircraft"]["route"], "SJC → PDX")
@@ -266,7 +353,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["status"], "no_aircraft")
 
     def test_invalid_location_returns_displayable_error(self):
-        result = transform.run(plugin_input({"ac": []}, latitude="north"))
+        result = transform.run(plugin_input({"ac": []}, lat_lon="north,-122.4194"))
         self.assertEqual(result["status"], "configuration_error")
         self.assertIn("latitude", result["message"])
 
@@ -300,8 +387,10 @@ class RunTests(unittest.TestCase):
     def test_local_trmnlp_env_placeholders_are_resolved(self):
         data = plugin_input(fixture("adsblol.json"))
         fields = data["trmnl"]["plugin_settings"]["custom_fields_values"]
-        fields["latitude"] = "{{ env.TRACKER_LATITUDE | default: 37.7749 }}"
-        fields["longitude"] = "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+        fields["lat_lon"] = (
+            "{{ env.TRACKER_LATITUDE | default: 37.7749 }},"
+            "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+        )
         fields["fr24_api_token"] = "{{ env.FR24_API_TOKEN }}"
         with mock.patch.dict(
             transform.os.environ,
@@ -315,6 +404,48 @@ class RunTests(unittest.TestCase):
             result = transform.run(data)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["provider_used"], "adsblol")
+
+
+class LocationTests(unittest.TestCase):
+    def test_location_picker_coordinates_take_precedence_over_legacy_fields(self):
+        config = transform._extract_config(plugin_input(
+            lat_lon=" 47.6062, -122.3321 ", latitude="37.7749", longitude="-122.4194"
+        ))
+        self.assertEqual((config["latitude"], config["longitude"]), (47.6062, -122.3321))
+
+    def test_location_picker_accepts_zero_and_boundary_coordinates(self):
+        for latitude, longitude in ((0, 0), (-90, -180), (90, 180)):
+            with self.subTest(latitude=latitude, longitude=longitude):
+                config = transform._extract_config(plugin_input(lat_lon=f"{latitude},{longitude}"))
+                self.assertEqual((config["latitude"], config["longitude"]), (latitude, longitude))
+
+    def test_invalid_location_picker_values_do_not_fall_back_to_legacy_location(self):
+        for value in (None, "", " ", "37.7", ",", "37.7,", ",-122.4", "1,2,3",
+                      "city,address", "91,0", "0,-181", "nan,0", "0,inf", [37.7, -122.4]):
+            with self.subTest(value=value):
+                result = transform.run(plugin_input(
+                    {"ac": []}, lat_lon=value, latitude="37.7", longitude="-122.4"
+                ))
+                self.assertEqual(result["status"], "configuration_error")
+
+    def test_legacy_coordinates_remain_supported(self):
+        data = plugin_input(latitude="47.6062", longitude="-122.3321")
+        del data["trmnl"]["plugin_settings"]["custom_fields_values"]["lat_lon"]
+        config = transform._extract_config(data)
+        self.assertEqual((config["latitude"], config["longitude"]), (47.6062, -122.3321))
+
+    def test_local_picker_template_uses_environment_and_sample_defaults(self):
+        data = plugin_input(lat_lon=(
+            "{{ env.TRACKER_LATITUDE | default: 37.7749 }},"
+            "{{ env.TRACKER_LONGITUDE | default: -122.4194 }}"
+        ))
+        for env, expected in (({}, (37.7749, -122.4194)),
+                              ({"TRACKER_LATITUDE": "0", "TRACKER_LONGITUDE": "0"}, (0, 0)),
+                              ({"TRACKER_LATITUDE": "47.6062", "TRACKER_LONGITUDE": "-122.3321"},
+                               (47.6062, -122.3321))):
+            with self.subTest(env=env), mock.patch.dict(transform.os.environ, env, clear=True):
+                config = transform._extract_config(data)
+                self.assertEqual((config["latitude"], config["longitude"]), expected)
 
 
 if __name__ == "__main__":

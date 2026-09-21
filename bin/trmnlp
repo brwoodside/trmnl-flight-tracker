@@ -2,7 +2,7 @@
 
 if command -v trmnlp &> /dev/null
 then
-    trmnlp "$@"
+    ruby "$(dirname "$0")/../scripts/trmnlp.rb" "$@"
     exit
 fi
 
@@ -21,6 +21,7 @@ then
     docker run \
         -it \
         --rm \
+        --entrypoint ruby \
         --publish 4567:4567 \
         --env TRACKER_LATITUDE \
         --env TRACKER_LONGITUDE \
@@ -33,7 +34,7 @@ then
         --env FLIGHTAWARE_AEROAPI_KEY \
         --volume "$(pwd):/plugin" \
         --volume "$CONFIG_DIR:/root/.config/trmnlp" \
-        trmnl/trmnlp "$@"
+        trmnl/trmnlp -I/app/lib /plugin/scripts/trmnlp.rb "$@"
     exit
 fi
 

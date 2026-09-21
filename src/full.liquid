@@ -1,36 +1,17 @@
+{% comment %}
+Only the radar geometry needs custom CSS. Text and layout use Framework
+classes so device fonts, responsive sizes, and content fitting stay native.
+{% endcomment %}
 <style>
-  .radar-full {
-    display: grid !important;
-    grid-template-columns: 52fr 48fr;
-    gap: 8px;
-    flex: 1;
-    min-height: 0;
-    width: 100%;
-  }
-
-  .radar-panel {
-    display: grid;
-    place-items: center;
-    min-width: 0;
-    border-right: 2px dotted #000;
-  }
-
   .radar-scope-shell {
     position: relative;
-    width: 100%;
-    height: 100%;
+    min-height: 0;
   }
 
   .radar-scope {
-    display: block;
+    position: absolute;
     width: 100%;
     height: 100%;
-    overflow: visible;
-  }
-
-  .radar-scope text {
-    fill: #000;
-    font-family: Arial, Helvetica, sans-serif;
   }
 
   .radar-axis,
@@ -55,32 +36,6 @@
     stroke-linecap: square;
   }
 
-  .radar-scope-label {
-    position: absolute;
-    z-index: 1;
-    font: 700 13px/1 Arial, Helvetica, sans-serif;
-    letter-spacing: .3px;
-    white-space: nowrap;
-  }
-
-  .radar-scope-label--up {
-    top: 0;
-    left: 0;
-  }
-
-  .radar-scope-label--location {
-    bottom: 0;
-    left: 0;
-    max-width: 58%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .radar-scope-label--range {
-    right: 0;
-    bottom: 0;
-  }
-
   .radar-north-disc {
     fill: #fff;
     stroke: #000;
@@ -88,7 +43,9 @@
   }
 
   .radar-north-label {
-    font: 800 3.2px/1 Arial, Helvetica, sans-serif;
+    fill: #000;
+    font-family: var(--label-font-family);
+    font-size: 3.2px;
     text-anchor: middle;
     dominant-baseline: central;
   }
@@ -102,165 +59,13 @@
     stroke: #fff;
     stroke-width: .7;
   }
-
-  .radar-rail {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    height: 100%;
-  }
-
-  .radar-kicker,
-  .radar-metric-label {
-    display: block;
-    font: 700 12px/1.05 Arial, Helvetica, sans-serif;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-  }
-
-  .radar-identity {
-    display: grid;
-    align-content: start;
-    row-gap: 3px;
-    min-height: 137px;
-    padding: 5px 0 10px;
-  }
-
-  .radar-ident {
-    display: block;
-    overflow: hidden;
-    font: 600 52px/.92 Arial, Helvetica, sans-serif;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .radar-ident--long {
-    font: 600 36px/.92 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-ident--xlong {
-    font: 600 24px/.92 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-airline {
-    display: block;
-    overflow: hidden;
-    font: 600 19px/1.05 Arial, Helvetica, sans-serif;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .radar-route {
-    display: block;
-    overflow: hidden;
-    font: 400 16px/1.08 Arial, Helvetica, sans-serif;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .radar-airframe {
-    display: block;
-    overflow: hidden;
-    font: 400 13px/1.08 Arial, Helvetica, sans-serif;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .radar-position,
-  .radar-telemetry {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    min-width: 0;
-    border-top: 2px solid #000;
-  }
-
-  .radar-position {
-    min-height: 83px;
-  }
-
-  .radar-telemetry {
-    flex: 1;
-    grid-template-rows: 1fr 1fr;
-  }
-
-  .radar-metric {
-    display: grid;
-    align-content: center;
-    row-gap: 4px;
-    min-width: 0;
-    padding: 7px 8px 6px 0;
-  }
-
-  .radar-position .radar-metric + .radar-metric,
-  .radar-telemetry .radar-metric:nth-child(even) {
-    border-left: 2px dotted #000;
-    padding-left: 10px;
-  }
-
-  .radar-telemetry .radar-metric:nth-child(n+3) {
-    border-top: 2px dotted #000;
-  }
-
-  .radar-metric-value {
-    display: block;
-    overflow: hidden;
-    font: 500 33px/1 Arial, Helvetica, sans-serif;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-
-  .radar-position .radar-metric-value {
-    font: 500 35px/1 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-direction .radar-metric-value {
-    font: 500 30px/1 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-bearing .radar-metric-value {
-    font: 500 31px/1 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-metric-note {
-    display: block;
-    overflow: hidden;
-    font: 400 14px/1.05 Arial, Helvetica, sans-serif;
-    font-variant-numeric: tabular-nums;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .radar-empty-copy {
-    display: grid;
-    align-content: center;
-    row-gap: 12px;
-    flex: 1;
-    padding-right: 8px;
-  }
-
-  .radar-empty-copy .radar-empty-title {
-    font: 600 34px/1.03 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-empty-copy .radar-empty-detail {
-    font: 400 16px/1.25 Arial, Helvetica, sans-serif;
-  }
-
-  .radar-error-code {
-    font: 700 14px/1 Arial, Helvetica, sans-serif;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-  }
 </style>
 
 {% if has_aircraft or status == "no_aircraft" %}
-  <div class="layout radar-full">
-    <div class="radar-panel">
-      <div class="radar-scope-shell">
-        <span class="radar-scope-label radar-scope-label--up">UP {{ scope.map_up_compass }} · {{ scope.map_up_bearing_deg }}°T</span>
-        <span class="radar-scope-label radar-scope-label--location">{{ location_label }}</span>
-        <span class="radar-scope-label radar-scope-label--range">RANGE {{ scope.range_nm }} NM</span>
-
+  <div class="layout layout--row portrait:layout--col gap--small lg:gap--large">
+    <div class="flex flex--col stretch gap--small">
+      <span class="label lg:label--large w--full">Up {{ scope.map_up_compass }} · {{ scope.map_up_bearing_deg }}°T</span>
+      <div class="radar-scope-shell stretch w--full">
         <svg class="radar-scope" viewBox="3.5 3.5 93 93" role="img" aria-labelledby="radar-title radar-description">
         <title id="radar-title">Aircraft range and bearing scope</title>
         {% if has_aircraft %}
@@ -295,67 +100,61 @@
         </g>
         </svg>
       </div>
+      <div class="flex flex--row flex--center-y gap--small w--full">
+        <span class="label lg:label--large stretch" data-clamp="1">{{ location_label }}</span>
+        <span class="label lg:label--large no-shrink">Range {{ scope.range_nm }} NM</span>
+      </div>
     </div>
+    <div class="divider--v portrait:hidden"></div>
+    <div class="divider hidden portrait:block"></div>
 
     {% if has_aircraft %}
-      <div class="radar-rail">
-        <div class="radar-identity">
-          <span class="radar-kicker">Closest contact</span>
-          {% assign identifier_length = aircraft.identifier | size %}
-          {% if identifier_length > 14 %}
-            <span class="value radar-ident radar-ident--xlong">{{ aircraft.identifier }}</span>
-          {% elsif identifier_length > 10 %}
-            <span class="value radar-ident radar-ident--long">{{ aircraft.identifier }}</span>
-          {% else %}
-            <span class="value radar-ident">{{ aircraft.identifier }}</span>
-          {% endif %}
-          <span class="radar-airline">{{ aircraft.operator | default: "Airline unavailable" }}</span>
-          <span class="radar-route">{{ aircraft.route }}</span>
-          <span class="radar-airframe">{{ aircraft.registration | default: "Registration unavailable" }} · {{ aircraft.aircraft_name | default: aircraft.aircraft_type | default: "Aircraft unavailable" }}</span>
+      <div class="flex flex--col flex--left stretch gap--small lg:gap--large">
+        <div class="flex flex--col flex--left gap--none w--full">
+          <span class="label lg:label--large">Closest contact</span>
+          <span class="value value--large lg:value--xlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
+          <span class="title lg:title--large w--full" data-clamp="1">{{ aircraft.operator | default: "Airline unavailable" }}</span>
+          <span class="description lg:description--large w--full" data-clamp="1">{{ aircraft.route }}</span>
+          <span class="label lg:label--large w--full" data-clamp="2">{{ aircraft.registration | default: "Registration unavailable" }} · {{ aircraft.aircraft_name | default: aircraft.aircraft_type | default: "Aircraft unavailable" }}</span>
         </div>
-
-        <div class="radar-position">
-          <div class="radar-metric">
-            <span class="radar-metric-value" data-fit-value="true">{{ aircraft.distance_display }}</span>
-            <span class="radar-metric-label">Distance</span>
+        <div class="divider"></div>
+        <div class="grid grid--cols-2 portrait:grid--cols-3 stretch gap--small lg:gap--large">
+          <div class="flex flex--col flex--left flex--center-y gap--none">
+            <span class="value value--tnums lg:value--large" data-value-fit="true">{{ aircraft.distance_display }}</span>
+            <span class="label lg:label--large">Distance</span>
           </div>
-          <div class="radar-metric radar-bearing">
-            <span class="radar-metric-value" data-fit-value="true">{{ aircraft.bearing_compass }} {{ aircraft.bearing_deg }}°</span>
-            <span class="radar-metric-label">Bearing true</span>
+          <div class="flex flex--col flex--left flex--center-y gap--none">
+            <span class="value value--tnums lg:value--large" data-value-fit="true">{{ aircraft.bearing_compass }} {{ aircraft.bearing_deg }}°</span>
+            <span class="label lg:label--large">Bearing true</span>
           </div>
-        </div>
-
-        <div class="radar-telemetry">
-          <div class="radar-metric">
-            <span class="radar-metric-value" data-fit-value="true">{{ aircraft.altitude_compact }}</span>
-            <span class="radar-metric-label">Altitude</span>
+          <div class="flex flex--col flex--left flex--center-y gap--none">
+            <span class="value value--tnums lg:value--large" data-value-fit="true">{{ aircraft.altitude_compact }}</span>
+            <span class="label lg:label--large">Altitude</span>
           </div>
-          <div class="radar-metric">
-            <span class="radar-metric-value" data-fit-value="true">{{ aircraft.speed_display }}</span>
-            <span class="radar-metric-label">Ground speed</span>
+          <div class="flex flex--col flex--left flex--center-y gap--none">
+            <span class="value value--tnums lg:value--large" data-value-fit="true">{{ aircraft.speed_display }}</span>
+            <span class="label lg:label--large">Ground speed</span>
           </div>
-          <div class="radar-metric">
-            <span class="radar-metric-value">{{ aircraft.vertical_trend_short }}</span>
-            <span class="radar-metric-label">Vertical trend</span>
-            <span class="radar-metric-note">{{ aircraft.vertical_rate_display }}</span>
+          <div class="flex flex--col flex--left flex--center-y gap--none">
+            <span class="value lg:value--large">{{ aircraft.vertical_trend_short }}</span>
+            <span class="label lg:label--large">Vertical trend</span>
+            <span class="description lg:description--large w--full" data-clamp="1">{{ aircraft.vertical_rate_display }}</span>
           </div>
-          <div class="radar-metric radar-direction">
-            {% if aircraft.direction_deg %}
-              <span class="radar-metric-value" data-fit-value="true">{{ aircraft.direction_compass }} {{ aircraft.direction_deg }}°</span>
+          <div class="flex flex--col flex--left flex--center-y gap--none">
+            {% if aircraft.direction_deg != nil %}
+              <span class="value value--tnums lg:value--large" data-value-fit="true">{{ aircraft.direction_compass }} {{ aircraft.direction_deg }}°</span>
             {% else %}
-              <span class="radar-metric-value">—</span>
+              <span class="value lg:value--large">—</span>
             {% endif %}
-            <span class="radar-metric-label">{{ aircraft.direction_label }}</span>
+            <span class="label lg:label--large">{{ aircraft.direction_label }}</span>
           </div>
         </div>
       </div>
     {% else %}
-      <div class="radar-rail">
-        <div class="radar-empty-copy">
-          <span class="radar-kicker">Scope clear</span>
-          <span class="radar-empty-title">No fresh aircraft within {{ search_radius_nm | round }} NM.</span>
-          <span class="radar-empty-detail">Centered on {{ location_label }}.<br>Map up: {{ scope.map_up_compass }} · {{ scope.map_up_bearing_deg }}° true.</span>
-        </div>
+      <div class="flex flex--col flex--left flex--center-y stretch gap lg:gap--large">
+        <span class="label lg:label--large">Scope clear</span>
+        <span class="title title--large lg:title--xxlarge">No fresh aircraft within {{ search_radius_nm | round }} NM.</span>
+        <span class="description lg:description--large">Centered on {{ location_label }}.<br>Map up: {{ scope.map_up_compass }} · {{ scope.map_up_bearing_deg }}° true.</span>
       </div>
     {% endif %}
   </div>
@@ -369,17 +168,17 @@
     {% endif %}
   </div>
 {% else %}
-  <div class="layout layout--col layout--center">
+  <div class="layout layout--col layout--center gap lg:gap--large">
     {% if status == "configuration_error" %}
-      <span class="radar-error-code">Configuration error</span>
-      <span class="value value--xxlarge">Tracker not configured</span>
-      <span class="title title--large">{{ message }}</span>
-      <span class="description">Check the plugin location and map settings.</span>
+      <span class="label lg:label--large">Configuration error</span>
+      <span class="title title--large lg:title--xxlarge">Tracker not configured</span>
+      <span class="description lg:description--large text--center" data-clamp="3">{{ message }}</span>
+      <span class="description lg:description--large">Check the plugin location and map settings.</span>
     {% else %}
-      <span class="radar-error-code">Provider error</span>
-      <span class="value value--xxlarge">Aircraft data unavailable</span>
-      <span class="title title--large">{{ message }}</span>
-      <span class="description">The tracker will retry on the next refresh.</span>
+      <span class="label lg:label--large">Provider error</span>
+      <span class="title title--large lg:title--xxlarge">Aircraft data unavailable</span>
+      <span class="description lg:description--large text--center" data-clamp="3">{{ message }}</span>
+      <span class="description lg:description--large">The tracker will retry on the next refresh.</span>
     {% endif %}
   </div>
   <div class="title_bar">
