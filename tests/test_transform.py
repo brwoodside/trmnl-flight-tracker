@@ -1,6 +1,10 @@
 import copy
 import importlib.util
 import json
+import subprocess
+import sys
+import threading
+import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +40,129 @@ def plugin_input(payload=None, **overrides):
     data = copy.deepcopy(payload or {})
     data["trmnl"] = {"plugin_settings": {"custom_fields_values": fields}}
     return data
+
+
+class RequestBudgetTests(unittest.TestCase):
+    def test_exhausted_budget_starts_no_network_work(self):
+        with mock.patch.object(transform, "_fetch_fr24") as fetch:
+            with self.assertRaisesRegex(transform.ProviderError, "budget exhausted"):
+                transform._fetch_provider("flightradar24", {}, time.monotonic() - 1)
+        fetch.assert_not_called()
+
+    def test_socket_timeout_uses_remaining_budget(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"data": []}'
+        with mock.patch.object(transform.time, "monotonic", return_value=10), \
+                mock.patch.object(transform.urllib.request, "urlopen", return_value=response) as request:
+            self.assertEqual(transform._fetch_json("https://example.com", deadline=10.25), {"data": []})
+        self.assertEqual(request.call_args.kwargs["timeout"], 0.25)
+
+    def test_antimeridian_requests_share_deadline(self):
+        config = transform._extract_config(plugin_input(
+            lat_lon="10,179.9", radius_nm="100", fr24_api_token="token"
+        ))
+        config["request_deadline"] = 100
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"data": []}'
+        # First request finishes before the deadline, but the second starts too late.
+        with mock.patch.object(transform.time, "monotonic", side_effect=[99, 99, 99, 101]), \
+                mock.patch.object(transform.urllib.request, "urlopen", return_value=response) as request:
+            with self.assertRaisesRegex(transform.ProviderError, "budget exhausted"):
+                transform._fetch_fr24(config)
+        self.assertEqual(request.call_count, 1)
+
+    def test_stalled_dns_or_body_read_cannot_block_adsb_fallback(self):
+        for phase in ("connect", "read"):
+            with self.subTest(phase=phase):
+                release = threading.Event()
+                finished = threading.Event()
+                entered = threading.Event()
+
+                def stall(*args, **kwargs):
+                    entered.set()
+                    try:
+                        release.wait(2)
+                        raise OSError("simulated network stall")
+                    finally:
+                        finished.set()
+
+                response = mock.MagicMock()
+                response.__enter__.return_value.read.side_effect = stall
+                data = plugin_input(fixture("adsblol.json"), fr24_api_token="token",
+                                    flightaware_api_key="key")
+                with mock.patch.object(transform, "_now_utc", return_value=FIXED_NOW), \
+                        mock.patch.object(transform, "PAID_PROVIDER_BUDGET_SECONDS", 0.05), \
+                        mock.patch.object(transform, "PROVIDER_TIMEOUT_SECONDS", 1), \
+                        mock.patch.object(transform, "_fetch_flightaware") as second, \
+                        mock.patch.object(transform.urllib.request, "urlopen") as request:
+                    if phase == "connect":
+                        request.side_effect = stall
+                    else:
+                        request.return_value = response
+                    try:
+                        start = time.monotonic()
+                        result = transform.run(data)
+                        elapsed = time.monotonic() - start
+                        self.assertTrue(entered.is_set())
+                        self.assertFalse(finished.is_set())
+                        self.assertLess(elapsed, 0.5)
+                        self.assertEqual(result["provider_used"], "adsblol")
+                        self.assertIn("budget exhausted", result["provider_attempts"][0]["detail"])
+                        self.assertIn("budget exhausted", result["provider_attempts"][1]["detail"])
+                        second.assert_not_called()
+                    finally:
+                        release.set()
+                        self.assertTrue(finished.wait(1))
+
+    def test_provider_attempt_limit_leaves_time_for_second_provider(self):
+        release = threading.Event()
+        finished = threading.Event()
+
+        def slow_first(config):
+            try:
+                release.wait(2)
+                return []
+            finally:
+                finished.set()
+
+        with mock.patch.object(transform, "_now_utc", return_value=FIXED_NOW), \
+                mock.patch.object(transform, "PROVIDER_TIMEOUT_SECONDS", 0.03), \
+                mock.patch.object(transform, "_fetch_fr24", side_effect=slow_first), \
+                mock.patch.object(transform, "_fetch_flightaware",
+                                  return_value=transform.normalize_flightaware(fixture("flightaware.json"))):
+            try:
+                result = transform.run(plugin_input(fixture("adsblol.json"),
+                    fr24_api_token="token", flightaware_api_key="key"))
+                self.assertEqual(result["provider_used"], "flightaware")
+                self.assertFalse(finished.is_set())
+            finally:
+                release.set()
+                self.assertTrue(finished.wait(1))
+
+    def test_stalled_worker_does_not_hold_process_open(self):
+        code = f"""
+import importlib.util, json, time
+from datetime import datetime, timezone
+spec = importlib.util.spec_from_file_location('transform', {str(ROOT / 'src/transform.py')!r})
+transform = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(transform)
+transform.PAID_PROVIDER_BUDGET_SECONDS = 0.03
+transform._now_utc = lambda: datetime(2026, 8, 25, 12, 2, tzinfo=timezone.utc)
+transform._fetch_fr24 = lambda config: time.sleep(10)
+data = json.loads({json.dumps(plugin_input(fixture('adsblol.json'), fr24_api_token='token'))!r})
+print(transform.run(data)['provider_used'])
+"""
+        result = subprocess.run([sys.executable, "-c", code], timeout=2,
+                                check=True, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "adsblol")
+
+    def test_open_only_starts_no_workers(self):
+        with mock.patch.object(transform, "_now_utc", return_value=FIXED_NOW), \
+                mock.patch.object(transform.threading, "Thread") as worker:
+            result = transform.run(plugin_input(fixture("adsblol.json"), provider_order="open_only",
+                fr24_api_token="token", flightaware_api_key="key"))
+        worker.assert_not_called()
+        self.assertEqual(result["provider_used"], "adsblol")
 
 
 class GeometryTests(unittest.TestCase):
@@ -290,7 +417,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(request_headers["Accept-Version"], "v1")
 
     def test_flightaware_is_used_after_fr24_error(self):
-        def fake_fetch(url, headers=None):
+        def fake_fetch(url, headers=None, **kwargs):
             if url.startswith(transform.FR24_URL):
                 raise transform.ProviderError("HTTP 429")
             return fixture("flightaware.json")

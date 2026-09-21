@@ -13,8 +13,16 @@
   </div>
 {% else %}
   <div class="layout layout--col layout--center">
-    <span class="value value--large">Clear sky</span>
-    <span class="description">No aircraft within {{ search_radius_nm }} nm</span>
+    {% if status == "no_aircraft" %}
+      <span class="value value--large">Clear sky</span>
+      <span class="description">No aircraft within {{ search_radius_nm }} nm</span>
+    {% elsif status == "configuration_error" %}
+      <span class="title">Tracker not configured</span>
+      <span class="description" data-clamp="3">{{ message }}</span>
+    {% else %}
+      <span class="title">Aircraft data unavailable</span>
+      <span class="description" data-clamp="3">{{ message }}</span>
+    {% endif %}
   </div>
   <div class="title_bar title_bar--small">
     <span class="title">Overhead</span>

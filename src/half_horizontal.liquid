@@ -1,6 +1,6 @@
 {% if has_aircraft %}
-  <div class="layout gap--space-between">
-    <div class="item">
+  <div class="layout portrait:layout--col gap--space-between">
+    <div class="item portrait:w--full">
       <div class="meta"></div>
       <div class="content">
         <span class="value value--xxlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
@@ -13,19 +13,19 @@
         {% endif %}
       </div>
     </div>
-    <div class="grid grid--cols-2">
+    <div class="grid grid--cols-2 portrait:w--full">
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums">{{ aircraft.distance_display }}</span>
-          <span class="label">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
+          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.distance_display }}</span>
+          <span class="label" data-clamp="2">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
         </div>
       </div>
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums">{{ aircraft.altitude_compact }}</span>
-          <span class="label">{{ aircraft.speed_display }} · {{ aircraft.heading_compass }}</span>
+          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.altitude_compact }}</span>
+          <span class="label" data-clamp="2">{{ aircraft.speed_display }} · {{ aircraft.heading_compass }}</span>
         </div>
       </div>
     </div>

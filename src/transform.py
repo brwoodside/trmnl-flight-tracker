@@ -12,7 +12,10 @@ runtime does not install this project's development dependencies.
 import json
 import math
 import os
+import queue
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,7 +25,10 @@ from typing import Any, Iterable
 
 FR24_URL = "https://fr24api.flightradar24.com/api/live/flight-positions/full"
 FLIGHTAWARE_URL = "https://aeroapi.flightaware.com/aeroapi/flights/search/advanced"
-HTTP_TIMEOUT_SECONDS = 8
+# Leave time inside TRMNL's five-second runtime for fallback and formatting.
+PAID_PROVIDER_BUDGET_SECONDS = 3.0
+PROVIDER_TIMEOUT_SECONDS = 1.4
+HTTP_TIMEOUT_SECONDS = 1.0
 USER_AGENT = "TRMNL-Overhead-Flight-Tracker/1.0"
 EARTH_RADIUS_NM = 3440.065
 SCOPE_RANGES_NM = (1, 2, 5, 10, 20, 50, 100, 250)
@@ -194,7 +200,16 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+def _remaining_request_time(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProviderError("request time budget exhausted")
+    return remaining
+
+
+def _fetch_json(
+    url: str, headers: dict[str, str] | None = None, *, deadline: float,
+) -> dict[str, Any]:
     request_headers = {
         "Accept": "application/json",
         "User-Agent": USER_AGENT,
@@ -203,8 +218,11 @@ def _fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, An
     request = urllib.request.Request(url, headers=request_headers)
 
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+        timeout = min(HTTP_TIMEOUT_SECONDS, _remaining_request_time(deadline))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            _remaining_request_time(deadline)
             body = response.read()
+        _remaining_request_time(deadline)
     except urllib.error.HTTPError as exc:
         raise ProviderError(f"HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -218,6 +236,36 @@ def _fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, An
     if not isinstance(payload, dict):
         raise ProviderError("unexpected response shape")
     return payload
+
+
+def _fetch_provider(
+    provider: str, config: dict[str, Any], deadline: float,
+) -> list[dict[str, Any]]:
+    """Bound caller wait, including DNS and body reads not bounded by socket timeout."""
+    _remaining_request_time(deadline)
+    attempt_deadline = min(deadline, time.monotonic() + PROVIDER_TIMEOUT_SECONDS)
+    responses: queue.Queue = queue.Queue(maxsize=1)
+    request_config = {**config, "request_deadline": attempt_deadline}
+
+    def fetch() -> None:
+        try:
+            function = _fetch_fr24 if provider == "flightradar24" else _fetch_flightaware
+            responses.put((function(request_config), None))
+        except Exception as exc:
+            responses.put((None, exc))
+
+    # An executor context would join a stalled request on exit. A daemon worker
+    # cannot hold up the result or process shutdown. Late results are discarded;
+    # the worker never mutates the screen result or starts requests past deadline.
+    threading.Thread(target=fetch, daemon=True).start()
+    try:
+        candidates, error = responses.get(timeout=_remaining_request_time(attempt_deadline))
+    except queue.Empty as exc:
+        raise ProviderError("request time budget exhausted") from exc
+    _remaining_request_time(attempt_deadline)
+    if error is not None:
+        raise error
+    return candidates
 
 
 def _coalesce(*values: Any) -> Any:
@@ -654,6 +702,7 @@ def _fetch_fr24(config: dict[str, Any]) -> list[dict[str, Any]]:
                 "Authorization": f"Bearer {token}",
                 "Accept-Version": "v1",
             },
+            deadline=config["request_deadline"],
         )
         all_candidates.extend(normalize_fr24(payload))
     return all_candidates
@@ -665,7 +714,10 @@ def _fetch_flightaware(config: dict[str, Any]) -> list[dict[str, Any]]:
     for north, south, west, east in bounding_boxes(config["latitude"], config["longitude"], config["radius_nm"]):
         query = f"{{range lat {south:.6f} {north:.6f}}} {{range lon {west:.6f} {east:.6f}}} {{true inAir}}"
         params = urllib.parse.urlencode({"query": query, "max_pages": 1})
-        payload = _fetch_json(f"{FLIGHTAWARE_URL}?{params}", {"x-apikey": api_key})
+        payload = _fetch_json(
+            f"{FLIGHTAWARE_URL}?{params}", {"x-apikey": api_key},
+            deadline=config["request_deadline"],
+        )
         all_candidates.extend(normalize_flightaware(payload))
     return all_candidates
 
@@ -911,6 +963,7 @@ def _base_result(config: dict[str, Any] | None, now: datetime) -> dict[str, Any]
 def run(input: dict[str, Any]) -> dict[str, Any]:
     """TRMNL serverless entrypoint."""
 
+    request_deadline = time.monotonic() + PAID_PROVIDER_BUDGET_SECONDS
     now = _now_utc()
     try:
         config = _extract_config(input)
@@ -936,10 +989,8 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             continue
 
         try:
-            if provider == "flightradar24":
-                candidates = _fetch_fr24(config)
-            elif provider == "flightaware":
-                candidates = _fetch_flightaware(config)
+            if provider in ("flightradar24", "flightaware"):
+                candidates = _fetch_provider(provider, config, request_deadline)
             else:
                 candidates = normalize_adsblol(input)
             any_successful_response = True

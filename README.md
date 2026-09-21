@@ -38,6 +38,18 @@ keeps FR24/FlightAware credentials out of the polling URL and headers. The
 transform uses only Python's standard library, matching TRMNL's hosted
 serverless convention.
 
+TRMNL's [serverless runtime](https://help.trmnl.com/en/articles/14130649-serverless)
+allows five seconds. Paid providers share a three-second budget from the start
+of the transform, with at most 1.4 seconds of waiting per provider and a one-second
+socket timeout. That budget includes both bounding boxes for searches crossing
+the date line. A daemon worker bounds the caller's wait even if DNS or a response
+body stalls; a late response is discarded and cannot change the selected flight.
+An in-flight operation may finish in the background, but it cannot prevent process
+exit or start another request after its deadline. This reserves time for the
+already-polled ADSB.lol fallback and formatting. Slow paid responses can therefore
+cause fallback even if the provider would eventually succeed. Without credentials,
+paid requests and workers are skipped entirely.
+
 No provider response is written to persistent storage by this project. Each
 screen contains only the selected aircraft and small diagnostic metadata.
 
@@ -77,10 +89,13 @@ map-service requests.
 
 ![North-up radar scope](docs/screenshots/radar-north-up.png)
 
-Also preview the [TRMNL X landscape](docs/screenshots/radar-x-landscape.png)
+Also preview the [OG portrait](docs/screenshots/radar-og-portrait.png),
+[TRMNL X landscape](docs/screenshots/radar-x-landscape.png)
 and [TRMNL X portrait](docs/screenshots/radar-x-portrait.png) layouts. They use
 the Framework's `lg:` typography and `portrait:` layout classes; portrait
-telemetry reflows into three columns. Values use Framework fitting and text
+telemetry reflows into three columns. In portrait mashups, the horizontal half-view
+stacks its identity and metrics, while the vertical half-view uses one metric
+column to keep the narrow slot readable. Values use Framework fitting and text
 clamping instead of custom font sizes.
 
 The rail shows flight/callsign, airline, route, aircraft name and ICAO type,
@@ -162,6 +177,33 @@ Use the repository's `./bin/trmnlp` wrapper for local checks. It adds only the
 documented `lat_lon` type to the older preview CLI's form-field allowlist until
 upstream includes it; every other lint check remains enabled. CI also verifies
 the form schema and polling URL with `ruby scripts/verify_form.rb`.
+
+Generate deterministic view fixtures and check every layout in aircraft, rotated,
+empty-sky, provider-error, and configuration-error states:
+
+```bash
+python3 scripts/render_fixtures.py
+ruby scripts/verify_views.rb
+# Add --png when Firefox and ImageMagick are available:
+ruby scripts/verify_views.rb --png
+```
+
+For Docker, replace the Ruby invocation with:
+
+```bash
+docker run --rm -v "$PWD:/plugin" --entrypoint ruby trmnl/trmnlp \
+  -I/app/lib /plugin/scripts/verify_views.rb --png
+```
+
+Artifacts are written to `_build/views/`. The device matrix includes OG landscape
+(800×480), OG portrait (480×800), X landscape (1872×1404), and X portrait
+(1404×1872). X uses the Framework's density scaling, corresponding to logical
+1040×780 and 780×1040 layouts. HTML assertions cover all states; PNGs cover all
+four normal layouts, rotated radar, and quadrant empty/error states on each device.
+Inspect the PNGs for clipping and readability; the HTML checks do not measure
+pixel overflow. PNG rendering downloads the pinned Framework 3.3.2 assets, but
+uses no live aircraft APIs or credentials. CI runs the fixture and HTML checks;
+PNG inspection remains a local verification step.
 
 ## Deploy to TRMNL
 

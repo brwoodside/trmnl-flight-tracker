@@ -14,35 +14,35 @@ classes so device fonts, responsive sizes, and content fitting stay native.
     height: 100%;
   }
 
-  .radar-axis,
-  .radar-ring--inner {
+  .radar-scope .radar-axis,
+  .radar-scope .radar-ring--inner {
     fill: none;
     stroke: #000;
     stroke-width: .45;
     stroke-dasharray: 1.1 1.8;
   }
 
-  .radar-ring--outer {
+  .radar-scope .radar-ring--outer {
     fill: #fff;
     stroke: #000;
     stroke-width: .65;
   }
 
-  .radar-tick,
-  .radar-center-mark {
+  .radar-scope .radar-tick,
+  .radar-scope .radar-center-mark {
     fill: none;
     stroke: #000;
     stroke-width: .85;
     stroke-linecap: square;
   }
 
-  .radar-north-disc {
+  .radar-scope .radar-north-disc {
     fill: #fff;
     stroke: #000;
     stroke-width: .55;
   }
 
-  .radar-north-label {
+  .radar-scope .radar-north-label {
     fill: #000;
     font-family: var(--label-font-family);
     font-size: 3.2px;
@@ -50,11 +50,11 @@ classes so device fonts, responsive sizes, and content fitting stay native.
     dominant-baseline: central;
   }
 
-  .radar-target {
+  .radar-scope .radar-target {
     fill: #000;
   }
 
-  .radar-target-dot {
+  .radar-scope .radar-target-dot {
     fill: #000;
     stroke: #fff;
     stroke-width: .7;
