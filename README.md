@@ -221,6 +221,31 @@ that a feeder-obtained API key may be required in the future. The display keeps
 source attribution visible when ADSB.lol is selected; redistribution or a
 derived database may create additional ODbL obligations.
 
+### Airline name resolution
+
+The transform resolves airline names locally, with no extra API calls or
+credentials. It first preserves a supplied operator name or expands a known
+ICAO operator code. When that field is missing, it looks up the three-letter
+prefix of a flight callsign such as `UAL1083` (United Airlines), `ASA924`
+(Alaska Airlines), or `SKW410Z` (SkyWest Airlines). FR24's painted/livery airline
+is used only when neither the operating airline nor callsign resolves.
+
+ADSB.lol's optional `ownOp` field is often absent; the callsign fallback works
+without it. FlightAware uses `operator_icao` or `operator` when supplied,
+otherwise its ICAO callsign. FR24's `operating_as` and `painted_as` codes are
+expanded through the same map.
+
+The compact `AIRLINE_NAMES` map in `src/transform.py` covers common passenger,
+regional, cargo, and charter operators. ICAO assignments were checked against
+the [FAA company designator table](https://www.faa.gov/air_traffic/publications/atpubs/cnt_html/chap3_section_3.html).
+Names describe the operating carrier, which can differ from the ticketed brand.
+This is not a complete or automatically updated airline directory: unknown
+explicit operator codes stay visible, and unknown callsigns remain unavailable.
+Callsign inference requires three letters followed by a digit and up to four
+more letters/digits; registrations, bare prefixes, and IATA flight numbers are
+not used to guess an airline. New assignments can be added to the map with a
+regression test.
+
 ### Aircraft name resolution
 
 The ADSB.lol-compatible aircraft response can include readsb's optional

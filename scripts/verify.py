@@ -39,6 +39,7 @@ def main():
     assert result["status"] == "ok", result
     assert result["provider_used"] == "adsblol", result
     assert result["aircraft"]["identifier"] == "UAL123", result
+    assert result["aircraft"]["operator"] == "United Airlines", result
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
