@@ -2,7 +2,7 @@ import copy
 import importlib.util
 import json
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -404,6 +404,175 @@ class RunTests(unittest.TestCase):
             result = transform.run(data)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["provider_used"], "adsblol")
+
+
+class RouteRetentionTests(unittest.TestCase):
+    def setUp(self):
+        self.clock = mock.patch.object(transform, "_now_utc", return_value=FIXED_NOW)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        self.fr24 = fixture("fr24.json")
+        self.fr24["data"][0].update(callsign="UAL123", flight="UA123", reg="N123UA")
+        self.fa = fixture("flightaware.json")
+        self.fa["flights"][0].update(ident="UAL123", ident_icao="UAL123",
+                                     ident_iata="UA123", registration="N123UA")
+
+    def first_result(self, provider="flightradar24", order="auto"):
+        with mock.patch.object(transform, "_fetch_json", return_value=(
+            self.fr24 if provider == "flightradar24" else self.fa
+        )):
+            return transform.run(plugin_input(
+                fixture("adsblol.json"), provider_order=order,
+                fr24_api_token="token" if provider == "flightradar24" else "",
+                flightaware_api_key="key" if provider == "flightaware" else "",
+            ))
+
+    def fallback(self, state, payload=None, **fields):
+        data = plugin_input(fixture("adsblol.json") if payload is None else payload,
+                            **fields)
+        data["trmnl"]["state"] = state
+        with mock.patch.object(transform, "_fetch_json",
+                               side_effect=transform.ProviderError("HTTP 429")):
+            return transform.run(data)
+
+    def test_fr24_route_survives_repeated_fallbacks_with_live_adsb_position(self):
+        first = self.first_result()
+        state = first["trmnl_state"]
+        for _ in range(3):
+            result = self.fallback(state, fr24_api_token="token")
+            aircraft = result["aircraft"]
+            self.assertEqual(result["provider_used"], "adsblol")
+            self.assertEqual(aircraft["route"], "SFO → SEA")
+            self.assertEqual(aircraft["route_source"], "flightradar24")
+            self.assertTrue(aircraft["route_retained"])
+            self.assertEqual(aircraft["latitude"], fixture("adsblol.json")["ac"][0]["lat"])
+            self.assertEqual(aircraft["altitude_ft"], fixture("adsblol.json")["ac"][0]["alt_baro"])
+            self.assertEqual(result["trmnl_state"], first["trmnl_state"])
+            state = result["trmnl_state"]
+        self.assertLess(len(json.dumps(state).encode()), 8192)
+        self.assertNotIn("latitude", state["last_route"])
+
+    def test_flightaware_first_route_survives_adsb_fallback(self):
+        first = self.first_result("flightaware", "flightaware_first")
+        result = self.fallback(first["trmnl_state"], provider_order="flightaware_first")
+        self.assertEqual(result["aircraft"]["route"], "SJC → PDX")
+        self.assertEqual(result["aircraft"]["route_source"], "flightaware")
+
+    def test_flightaware_can_inherit_fr24_route_without_mixing_endpoints(self):
+        first = self.first_result()
+        self.fa["flights"][0].update(origin={"code_iata": "SFO"}, destination=None)
+        data = plugin_input(flightaware_api_key="key")
+        data["trmnl"]["state"] = first["trmnl_state"]
+        with mock.patch.object(transform, "_fetch_json", return_value=self.fa):
+            result = transform.run(data)
+        self.assertEqual(result["provider_used"], "flightaware")
+        self.assertEqual(result["aircraft"]["route"], "SFO → SEA")
+
+    def test_live_route_wins_and_replaces_saved_route(self):
+        first = self.first_result()
+        data = plugin_input(flightaware_api_key="key")
+        data["trmnl"]["state"] = first["trmnl_state"]
+        with mock.patch.object(transform, "_fetch_json", return_value=self.fa):
+            result = transform.run(data)
+        self.assertEqual(result["aircraft"]["route"], "SJC → PDX")
+        self.assertFalse(result["aircraft"]["route_retained"])
+        self.assertEqual(result["trmnl_state"]["last_route"]["source"], "flightaware")
+
+    def test_conflicting_partial_route_invalidates_saved_route(self):
+        first = self.first_result()
+        self.fa["flights"][0]["destination"] = None
+        data = plugin_input(flightaware_api_key="key")
+        data["trmnl"]["state"] = first["trmnl_state"]
+        with mock.patch.object(transform, "_fetch_json", return_value=self.fa):
+            result = transform.run(data)
+        self.assertFalse(result["aircraft"]["route_available"])
+        self.assertEqual(result["trmnl_state"], {})
+
+    def test_different_flight_or_conflicting_tail_does_not_inherit_route(self):
+        state = self.first_result()["trmnl_state"]
+        for changes in ({"flight": "UAL456"}, {"r": "N456UA"},
+                        {"flight": "N123UA"}, {"flight": ""}):
+            with self.subTest(changes=changes):
+                payload = fixture("adsblol.json")
+                payload["ac"][0].update(changes)
+                result = self.fallback(state, payload)
+                self.assertFalse(result["aircraft"]["route_available"])
+
+    def test_conflicting_tail_invalidates_route_for_later_refreshes(self):
+        state = self.first_result()["trmnl_state"]
+        payload = fixture("adsblol.json")
+        payload["ac"][0]["r"] = "N456UA"
+        result = self.fallback(state, payload)
+        self.assertEqual(result["trmnl_state"], {})
+        payload["ac"][0].pop("r")
+        self.assertFalse(self.fallback(result["trmnl_state"], payload)["aircraft"]["route_available"])
+
+    def test_flightaware_first_route_can_fill_fr24_route(self):
+        state = self.first_result("flightaware", "flightaware_first")["trmnl_state"]
+        self.fr24["data"][0].update(orig_iata=None, orig_icao=None, dest_iata=None, dest_icao=None)
+        data = plugin_input(fr24_api_token="token", provider_order="flightaware_first")
+        data["trmnl"]["state"] = state
+        with mock.patch.object(transform, "_fetch_json", return_value=self.fr24):
+            result = transform.run(data)
+        self.assertEqual(result["provider_used"], "flightradar24")
+        self.assertEqual(result["aircraft"]["route"], "SJC → PDX")
+        self.assertEqual(result["aircraft"]["route_source"], "flightaware")
+
+    def test_callsign_case_whitespace_and_registration_hyphens_are_normalized(self):
+        state = self.first_result()["trmnl_state"]
+        payload = fixture("adsblol.json")
+        payload["ac"][0].update(flight=" ual123 ", r="N-123UA")
+        self.assertTrue(self.fallback(state, payload)["aircraft"]["route_retained"])
+
+    def test_missing_tail_allows_callsign_match(self):
+        state = self.first_result()["trmnl_state"]
+        payload = fixture("adsblol.json")
+        payload["ac"][0].pop("r")
+        self.assertTrue(self.fallback(state, payload)["aircraft"]["route_retained"])
+
+    def test_tail_number_callsigns_are_not_saved(self):
+        self.fr24["data"][0].update(callsign="N123UA")
+        self.assertEqual(self.first_result()["trmnl_state"], {})
+
+    def test_expired_and_future_routes_are_discarded(self):
+        for offset in (-transform.ROUTE_MAX_AGE_SECONDS, 1):
+            with self.subTest(offset=offset):
+                state = self.first_result()["trmnl_state"]
+                state["last_route"]["observed_at"] = (FIXED_NOW + timedelta(seconds=offset)).isoformat()
+                result = self.fallback(state)
+                self.assertFalse(result["aircraft"]["route_available"])
+                self.assertEqual(result["trmnl_state"], {})
+
+    def test_empty_error_and_configuration_error_refreshes_preserve_route(self):
+        state = self.first_result()["trmnl_state"]
+        for payload, fields, status in (({"ac": []}, {}, "no_aircraft"),
+                                        ({}, {}, "provider_error"),
+                                        ({}, {"lat_lon": "invalid"}, "configuration_error")):
+            with self.subTest(status=status):
+                result = self.fallback(state, payload, **fields)
+                self.assertEqual(result["status"], status)
+                self.assertEqual(result["trmnl_state"], state)
+                self.assertTrue(self.fallback(result["trmnl_state"])["aircraft"]["route_available"])
+
+    def test_malformed_saved_state_is_ignored(self):
+        record = self.first_result()["trmnl_state"]["last_route"]
+        bad_states = [None, [], "bad", {}, {"last_route": []}]
+        for key in record:
+            bad_states.append({"last_route": {**record, key: {"unexpected": "object"}}})
+        bad_states.append({"last_route": {**record, "origin": "X" * 9000}})
+        for state in bad_states:
+            with self.subTest(state=str(state)[:100]):
+                result = self.fallback(state)
+                self.assertFalse(result["aircraft"]["route_available"])
+
+    def test_lower_priority_route_does_not_fill_higher_priority_provider(self):
+        state = self.first_result("flightaware")["trmnl_state"]
+        self.fr24["data"][0].update(orig_iata=None, orig_icao=None, dest_iata=None, dest_icao=None)
+        data = plugin_input(fr24_api_token="token")
+        data["trmnl"]["state"] = state
+        with mock.patch.object(transform, "_fetch_json", return_value=self.fr24):
+            result = transform.run(data)
+        self.assertFalse(result["aircraft"]["route_available"])
 
 
 class LocationTests(unittest.TestCase):

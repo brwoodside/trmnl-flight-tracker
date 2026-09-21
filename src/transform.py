@@ -23,6 +23,7 @@ from typing import Any, Iterable
 FR24_URL = "https://fr24api.flightradar24.com/api/live/flight-positions/full"
 FLIGHTAWARE_URL = "https://aeroapi.flightaware.com/aeroapi/flights/search/advanced"
 HTTP_TIMEOUT_SECONDS = 8
+ROUTE_MAX_AGE_SECONDS = 2 * 60 * 60
 USER_AGENT = "TRMNL-Overhead-Flight-Tracker/1.0"
 EARTH_RADIUS_NM = 3440.065
 SCOPE_RANGES_NM = (1, 2, 5, 10, 20, 50, 100, 250)
@@ -814,6 +815,73 @@ def _extract_config(input_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _route_token(value: Any) -> str:
+    """Normalize identity/airport codes and bound the saved-state payload."""
+    if not isinstance(value, str):
+        return ""
+    token = value.strip().upper().replace("-", "")
+    return token if re.fullmatch(r"[A-Z0-9]{1,16}", token) else ""
+
+
+def _route_record(candidate: Any, now: datetime) -> dict[str, str] | None:
+    if not isinstance(candidate, dict):
+        return None
+    fields = {
+        key: _route_token(candidate.get(key))
+        for key in ("callsign", "registration", "origin", "destination")
+    }
+    if candidate.get("registration") and not fields["registration"]:
+        return None
+    # A tail number identifies an aircraft, not a flight. Never retain its route.
+    if (not re.fullmatch(r"[A-Z]{3}[0-9][A-Z0-9]*", fields["callsign"])
+            or fields["callsign"] == fields["registration"]
+            or not fields["origin"] or not fields["destination"]):
+        return None
+    source = candidate.get("source")
+    observed_at = _parse_time(candidate.get("observed_at"))
+    if source not in ("flightradar24", "flightaware") or observed_at is None:
+        return None
+    if not 0 <= (now - observed_at).total_seconds() < ROUTE_MAX_AGE_SECONDS:
+        return None
+    return {**fields, "source": source, "observed_at": observed_at.isoformat()}
+
+
+def _saved_route(input: dict[str, Any], now: datetime) -> dict[str, str] | None:
+    trmnl = input.get("trmnl")
+    state = trmnl.get("state") if isinstance(trmnl, dict) else None
+    return _route_record(state.get("last_route"), now) if isinstance(state, dict) else None
+
+
+def _retain_route(
+    candidate: dict[str, Any], saved: dict[str, str] | None,
+    providers: list[str], now: datetime,
+) -> dict[str, str] | None:
+    """Fill missing route metadata without replacing current position or live route."""
+    candidate["route_retained"] = False
+    complete_route = bool(candidate.get("origin") and candidate.get("destination"))
+    candidate["route_source"] = candidate["source"] if complete_route else None
+    if complete_route:
+        return _route_record(candidate, now)
+    if not saved or saved["source"] not in providers:
+        return saved
+    callsign = _route_token(candidate.get("callsign"))
+    registration = _route_token(candidate.get("registration"))
+    if callsign != saved["callsign"] or callsign == registration:
+        return saved
+    if registration and saved["registration"] and registration != saved["registration"]:
+        return None
+    # A changed endpoint can indicate a new leg or a diversion. Do not splice routes.
+    if any(candidate.get(key) and _route_token(candidate[key]) != saved[key]
+           for key in ("origin", "destination")):
+        return None
+    if providers.index(saved["source"]) > providers.index(candidate["source"]):
+        return saved
+    candidate.update(origin=saved["origin"], destination=saved["destination"],
+                     route_source=saved["source"], route_retained=True)
+    # Reusing the route must not renew its expiry on every fallback refresh.
+    return saved
+
+
 def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
     altitude = candidate.get("altitude_ft")
     speed = candidate.get("groundspeed_kts")
@@ -912,14 +980,18 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
     """TRMNL serverless entrypoint."""
 
     now = _now_utc()
+    saved_route = _saved_route(input, now)
+    route_state = {"last_route": saved_route} if saved_route else {}
     try:
         config = _extract_config(input)
     except ConfigurationError as exc:
         result = _base_result(None, now)
+        result["trmnl_state"] = route_state
         result.update(status="configuration_error", message=f"Configuration error: {exc}")
         return result
 
     result = _base_result(config, now)
+    result["trmnl_state"] = route_state
     providers = _provider_sequence(config)
     any_successful_response = False
 
@@ -956,6 +1028,8 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             )
             continue
 
+        saved_route = _retain_route(nearest, saved_route, providers, now)
+        result["trmnl_state"] = {"last_route": saved_route} if saved_route else {}
         aircraft = _format_aircraft(nearest)
         result.update(
             has_aircraft=True,
