@@ -12,7 +12,10 @@ runtime does not install this project's development dependencies.
 import json
 import math
 import os
+import queue
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,8 +24,13 @@ from typing import Any, Iterable
 
 
 FR24_URL = "https://fr24api.flightradar24.com/api/live/flight-positions/full"
+FR24_SUMMARY_URL = "https://fr24api.flightradar24.com/api/flight-summary/light"
 FLIGHTAWARE_URL = "https://aeroapi.flightaware.com/aeroapi/flights/search/advanced"
-HTTP_TIMEOUT_SECONDS = 8
+# Leave time inside TRMNL's five-second runtime for fallback and formatting.
+PAID_PROVIDER_BUDGET_SECONDS = 3.0
+PROVIDER_TIMEOUT_SECONDS = 1.4
+ROUTE_ENRICHMENT_TIMEOUT_SECONDS = 0.8
+HTTP_TIMEOUT_SECONDS = 1.0
 ROUTE_MAX_AGE_SECONDS = 2 * 60 * 60
 USER_AGENT = "TRMNL-Overhead-Flight-Tracker/1.0"
 EARTH_RADIUS_NM = 3440.065
@@ -35,61 +43,209 @@ SCOPE_RADIUS = 40.0
 # Use familiar display names; regional operators stay distinct from marketing
 # carriers. Keep this in the transform because TRMNL uploads it as one file.
 AIRLINE_NAMES = {
+    "ABX": "ABX Air",
     "AAL": "American Airlines",
     "AAR": "Asiana Airlines",
     "AAY": "Allegiant Air",
     "ACA": "Air Canada",
+    "AEA": "Air Europa",
     "AFR": "Air France",
     "AIC": "Air India",
+    "AJT": "Amerijet International",
+    "AMF": "Ameriflight",
     "AMX": "Aeromexico",
     "ANA": "All Nippon Airways",
     "ANZ": "Air New Zealand",
     "ASA": "Alaska Airlines",
     "ASH": "Mesa Airlines",
+    "ATN": "Air Transport International",
+    "AVA": "Avianca",
+    "AZU": "Azul Brazilian Airlines",
     "BAW": "British Airways",
+    "BTQ": "Boutique Air",
     "CCA": "Air China",
     "CES": "China Eastern Airlines",
     "CFG": "Condor",
+    "CKS": "Kalitta Air",
+    "CLX": "Cargolux",
+    "CMP": "Copa Airlines",
+    "CNS": "PlaneSense",
     "CPA": "Cathay Pacific",
     "CSN": "China Southern Airlines",
     "DAL": "Delta Air Lines",
     "DLH": "Lufthansa",
+    "EDV": "Endeavor Air",
+    "EJA": "NetJets",
     "EIN": "Aer Lingus",
     "ENY": "Envoy Air",
+    "ETD": "Etihad Airways",
+    "ETH": "Ethiopian Airlines",
     "EVA": "EVA Air",
+    "EZY": "easyJet",
     "FDX": "FedEx Express",
     "FFT": "Frontier Airlines",
+    "FDY": "Southern Airways Express",
     "FIN": "Finnair",
+    "GJS": "GoJet Airlines",
+    "GLO": "GOL Linhas Aereas",
+    "GTI": "Atlas Air",
     "HAL": "Hawaiian Airlines",
     "IBE": "Iberia",
     "ICE": "Icelandair",
+    "ITY": "ITA Airways",
     "JAL": "Japan Airlines",
+    "JIA": "PSA Airlines",
     "JBU": "JetBlue Airways",
+    "JSX": "JSX",
     "JZA": "Jazz Aviation",
+    "KAI": "KaiserAir",
     "KAL": "Korean Air",
+    "KAP": "Cape Air",
+    "KII": "Kalitta Charters",
     "KLM": "KLM Royal Dutch Airlines",
+    "KQA": "Kenya Airways",
+    "LAN": "LATAM Airlines",
     "LOT": "LOT Polish Airlines",
     "LXJ": "Flexjet",
+    "MXY": "Breeze Airways",
+    "NCR": "National Airlines",
     "NKS": "Spirit Airlines",
+    "NOZ": "Norwegian Air Shuttle",
+    "PAC": "Polar Air Cargo",
     "PDT": "Piedmont Airlines",
+    "POE": "Porter Airlines",
     "QFA": "Qantas",
     "QTR": "Qatar Airways",
     "QXE": "Horizon Air",
+    "ROU": "Air Canada Rouge",
     "RPA": "Republic Airways",
     "RYR": "Ryanair",
     "SAS": "Scandinavian Airlines",
+    "SCX": "Sun Country Airlines",
     "SIA": "Singapore Airlines",
     "SKW": "SkyWest Airlines",
+    "SVA": "Saudia",
     "SWA": "Southwest Airlines",
+    "SWG": "Sunwing Airlines",
     "SWR": "Swiss International Air Lines",
     "TAP": "TAP Air Portugal",
     "THY": "Turkish Airlines",
+    "TRA": "Transavia",
+    "TSC": "Air Transat",
     "UAE": "Emirates",
     "UAL": "United Airlines",
+    "UCA": "CommuteAir",
     "UPS": "UPS Airlines",
+    "VJA": "VistaJet",
     "VIR": "Virgin Atlantic",
+    "VLG": "Vueling",
     "VOI": "Volaris",
+    "VTE": "Contour Airlines",
+    "VXP": "Avelo Airlines",
+    "WGN": "Western Global Airlines",
     "WJA": "WestJet",
+    "WSN": "Advanced Air",
+    "XOJ": "XOJET Aviation",
+    "XSR": "Airshare",
+}
+
+# IATA flight numbers are common in provider marketing-flight fields and are
+# occasionally entered directly as the ADS-B callsign. Map them to the same
+# canonical ICAO identity used by route retention. Codes may contain a digit.
+IATA_TO_ICAO = {
+    "4B": "BTQ",
+    "5X": "UPS",
+    "5Y": "GTI",
+    "8C": "ATN",
+    "9E": "EDV",
+    "9K": "KAP",
+    "9X": "FDY",
+    "AA": "AAL",
+    "AC": "ACA",
+    "AD": "AZU",
+    "AF": "AFR",
+    "AI": "AIC",
+    "AM": "AMX",
+    "AN": "WSN",
+    "AS": "ASA",
+    "AV": "AVA",
+    "AY": "FIN",
+    "AZ": "ITY",
+    "B6": "JBU",
+    "BA": "BAW",
+    "BR": "EVA",
+    "C5": "UCA",
+    "CA": "CCA",
+    "CM": "CMP",
+    "CV": "CLX",
+    "CX": "CPA",
+    "CZ": "CSN",
+    "DE": "CFG",
+    "DL": "DAL",
+    "DY": "NOZ",
+    "EI": "EIN",
+    "EK": "UAE",
+    "ET": "ETH",
+    "EY": "ETD",
+    "F9": "FFT",
+    "FI": "ICE",
+    "FR": "RYR",
+    "FX": "FDX",
+    "G3": "GLO",
+    "G4": "AAY",
+    "G7": "GJS",
+    "GB": "ABX",
+    "HA": "HAL",
+    "HV": "TRA",
+    "IB": "IBE",
+    "JL": "JAL",
+    "K4": "CKS",
+    "KE": "KAL",
+    "KL": "KLM",
+    "KQ": "KQA",
+    "LA": "LAN",
+    "LF": "VTE",
+    "LH": "DLH",
+    "LO": "LOT",
+    "LX": "SWR",
+    "M6": "AJT",
+    "MQ": "ENY",
+    "MU": "CES",
+    "MX": "MXY",
+    "N8": "NCR",
+    "NH": "ANA",
+    "NK": "NKS",
+    "NZ": "ANZ",
+    "OH": "JIA",
+    "OO": "SKW",
+    "OZ": "AAR",
+    "PD": "POE",
+    "PO": "PAC",
+    "PT": "PDT",
+    "QF": "QFA",
+    "QR": "QTR",
+    "QX": "QXE",
+    "RV": "ROU",
+    "SK": "SAS",
+    "SQ": "SIA",
+    "SV": "SVA",
+    "SY": "SCX",
+    "TK": "THY",
+    "TP": "TAP",
+    "TS": "TSC",
+    "U2": "EZY",
+    "UA": "UAL",
+    "UX": "AEA",
+    "VS": "VIR",
+    "VY": "VLG",
+    "WG": "SWG",
+    "WN": "SWA",
+    "WS": "WJA",
+    "XE": "JSX",
+    "XP": "VXP",
+    "Y4": "VOI",
+    "YV": "ASH",
+    "YX": "RPA",
 }
 
 # Provider descriptions are more specific and always win. This deliberately
@@ -195,7 +351,16 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+def _remaining_request_time(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProviderError("request time budget exhausted")
+    return remaining
+
+
+def _fetch_json(
+    url: str, headers: dict[str, str] | None = None, *, deadline: float,
+) -> dict[str, Any]:
     request_headers = {
         "Accept": "application/json",
         "User-Agent": USER_AGENT,
@@ -204,8 +369,11 @@ def _fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, An
     request = urllib.request.Request(url, headers=request_headers)
 
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+        timeout = min(HTTP_TIMEOUT_SECONDS, _remaining_request_time(deadline))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            _remaining_request_time(deadline)
             body = response.read()
+        _remaining_request_time(deadline)
     except urllib.error.HTTPError as exc:
         raise ProviderError(f"HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -219,6 +387,36 @@ def _fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, An
     if not isinstance(payload, dict):
         raise ProviderError("unexpected response shape")
     return payload
+
+
+def _fetch_provider(
+    provider: str, config: dict[str, Any], deadline: float,
+) -> list[dict[str, Any]]:
+    """Bound caller wait, including DNS and body reads not bounded by socket timeout."""
+    _remaining_request_time(deadline)
+    attempt_deadline = min(deadline, time.monotonic() + PROVIDER_TIMEOUT_SECONDS)
+    responses: queue.Queue = queue.Queue(maxsize=1)
+    request_config = {**config, "request_deadline": attempt_deadline}
+
+    def fetch() -> None:
+        try:
+            function = _fetch_fr24 if provider == "flightradar24" else _fetch_flightaware
+            responses.put((function(request_config), None))
+        except Exception as exc:
+            responses.put((None, exc))
+
+    # An executor context would join a stalled request on exit. A daemon worker
+    # cannot hold up the result or process shutdown. Late results are discarded;
+    # the worker never mutates the screen result or starts requests past deadline.
+    threading.Thread(target=fetch, daemon=True).start()
+    try:
+        candidates, error = responses.get(timeout=_remaining_request_time(attempt_deadline))
+    except queue.Empty as exc:
+        raise ProviderError("request time budget exhausted") from exc
+    _remaining_request_time(attempt_deadline)
+    if error is not None:
+        raise error
+    return candidates
 
 
 def _coalesce(*values: Any) -> Any:
@@ -243,29 +441,53 @@ def _aircraft_name(aircraft_type: Any, provider_name: Any = None) -> str | None:
     return AIRCRAFT_TYPE_NAMES.get(designator.upper()) if designator else None
 
 
+def _operator_name(value: Any) -> str | None:
+    """Expand a known ICAO or IATA operator code, preserving provider names."""
+    name = _clean_text(value)
+    if not name:
+        return None
+    code = name.upper()
+    icao = IATA_TO_ICAO.get(code, code)
+    return AIRLINE_NAMES.get(icao, name)
+
+
+def _flight_identity(value: Any) -> tuple[str, str | None] | None:
+    """Return a canonical ICAO-style flight identity and known airline name."""
+    identifier = (_clean_text(value) or "").upper()
+    icao_match = re.fullmatch(r"([A-Z]{3})([0-9][A-Z0-9]{0,4})", identifier)
+    if icao_match:
+        icao, number = icao_match.groups()
+        return (f"{icao}{number}", AIRLINE_NAMES.get(icao))
+
+    iata_match = re.fullmatch(r"([A-Z0-9]{2})([0-9][A-Z0-9]{0,5})", identifier)
+    if iata_match:
+        iata, number = iata_match.groups()
+        icao = IATA_TO_ICAO.get(iata)
+        if icao:
+            return (f"{icao}{number}", AIRLINE_NAMES.get(icao))
+    return None
+
+
 def _airline_name(
     operator: Any,
     callsign: Any,
     registration: Any,
     fallback_operator: Any = None,
+    flight: Any = None,
 ) -> str | None:
-    """Prefer provider identity, then a recognized ICAO flight callsign, then livery."""
-    name = _clean_text(operator)
+    """Prefer provider identity, then callsign/flight inference, then livery."""
+    name = _operator_name(operator)
     if name:
-        # An unknown explicit code still beats an inferred carrier.
-        return AIRLINE_NAMES.get(name.upper(), name)
+        return name
 
-    flight = (_clean_text(callsign) or "").upper()
     tail = (_clean_text(registration) or "").upper()
-    # Require a numeric flight-number start and an ADS-B-sized identifier.
-    # Never derive an airline from a tail number, IATA flight, or bare prefix.
-    if flight != tail and re.fullmatch(r"[A-Z]{3}[0-9][A-Z0-9]{0,4}", flight):
-        name = AIRLINE_NAMES.get(flight[:3])
-        if name:
-            return name
+    normalized_tail = tail.replace("-", "")
+    for identifier in (callsign, flight):
+        identity = _flight_identity(identifier)
+        if identity and identity[0] != normalized_tail and identity[1]:
+            return identity[1]
 
-    fallback = _clean_text(fallback_operator)
-    return AIRLINE_NAMES.get(fallback.upper(), fallback) if fallback else None
+    return _operator_name(fallback_operator)
 
 
 def _float(value: Any) -> float | None:
@@ -472,6 +694,7 @@ def _candidate(
     *,
     source: str,
     identifier: Any,
+    provider_flight_id: Any = None,
     latitude: Any,
     longitude: Any,
     altitude_ft: Any = None,
@@ -516,13 +739,16 @@ def _candidate(
 
     return {
         "source": source,
+        "provider_flight_id": _clean_text(provider_flight_id),
         "identifier": identifier_text,
         "callsign": callsign_text,
         "flight": flight_text,
         "registration": registration_text,
         "aircraft_type": _clean_text(aircraft_type),
         "aircraft_name": _clean_text(aircraft_name),
-        "operator": _airline_name(operator, callsign_text, registration_text, fallback_operator),
+        "operator": _airline_name(
+            operator, callsign_text, registration_text, fallback_operator, flight_text
+        ),
         "origin": _clean_text(origin),
         "destination": _clean_text(destination),
         "latitude": lat,
@@ -545,6 +771,7 @@ def normalize_fr24(payload: dict[str, Any]) -> list[dict[str, Any]]:
         item = _candidate(
             source="flightradar24",
             identifier=_coalesce(row.get("flight"), row.get("callsign"), row.get("reg"), row.get("hex")),
+            provider_flight_id=row.get("fr24_id"),
             callsign=row.get("callsign"),
             flight=row.get("flight"),
             registration=row.get("reg"),
@@ -655,9 +882,121 @@ def _fetch_fr24(config: dict[str, Any]) -> list[dict[str, Any]]:
                 "Authorization": f"Bearer {token}",
                 "Accept-Version": "v1",
             },
+            deadline=config["request_deadline"],
         )
         all_candidates.extend(normalize_fr24(payload))
     return all_candidates
+
+
+def _fetch_fr24_summary_route(
+    candidate: dict[str, Any], config: dict[str, Any]
+) -> dict[str, Any]:
+    """Fill a selected FR24 record from its same-provider light summary."""
+    flight_id = _clean_text(candidate.get("provider_flight_id"))
+    if not flight_id:
+        return candidate
+    params = urllib.parse.urlencode({"flight_ids": flight_id, "limit": 1})
+    payload = _fetch_json(
+        f"{FR24_SUMMARY_URL}?{params}",
+        {
+            "Authorization": f"Bearer {config['fr24_api_token']}",
+            "Accept-Version": "v1",
+        },
+        deadline=config["request_deadline"],
+    )
+    summary = next(
+        (
+            row
+            for row in payload.get("data") or []
+            if isinstance(row, dict) and _clean_text(row.get("fr24_id")) == flight_id
+        ),
+        None,
+    )
+    if summary is None:
+        return candidate
+
+    summary_origin = _coalesce(summary.get("orig_iata"), summary.get("orig_icao"))
+    summary_destination = _coalesce(
+        summary.get("dest_iata_actual"),
+        summary.get("dest_iata"),
+        summary.get("dest_icao_actual"),
+        summary.get("dest_icao"),
+    )
+    for current, replacement in (
+        (candidate.get("origin"), summary_origin),
+        (candidate.get("destination"), summary_destination),
+    ):
+        current_code = _route_token(current)
+        replacement_code = _route_token(replacement)
+        # Light summaries use ICAO airport codes while live records prefer IATA.
+        # Only reject a same-code-system conflict; the fr24_id already identifies
+        # the exact flight across the two same-provider responses.
+        if (
+            current_code
+            and replacement_code
+            and len(current_code) == len(replacement_code)
+            and current_code != replacement_code
+        ):
+            return candidate
+
+    enriched = dict(candidate)
+    enriched["origin"] = _clean_text(_coalesce(candidate.get("origin"), summary_origin))
+    enriched["destination"] = _clean_text(
+        _coalesce(candidate.get("destination"), summary_destination)
+    )
+    for key, summary_key in (
+        ("callsign", "callsign"),
+        ("flight", "flight"),
+        ("registration", "reg"),
+        ("aircraft_type", "type"),
+    ):
+        enriched[key] = _clean_text(_coalesce(candidate.get(key), summary.get(summary_key)))
+    if not enriched.get("operator"):
+        enriched["operator"] = _airline_name(
+            summary.get("operating_as"),
+            enriched.get("callsign"),
+            enriched.get("registration"),
+            summary.get("painted_as"),
+            enriched.get("flight"),
+        )
+    enriched["route_enriched"] = bool(
+        enriched.get("origin") and enriched.get("destination")
+    )
+    return enriched
+
+
+def _try_fr24_summary_route(
+    candidate: dict[str, Any], config: dict[str, Any], deadline: float
+) -> dict[str, Any]:
+    """Bound optional route enrichment so it can never delay ADSB fallback."""
+    if (
+        candidate.get("source") != "flightradar24"
+        or not candidate.get("provider_flight_id")
+        or time.monotonic() >= deadline
+    ):
+        return candidate
+
+    attempt_deadline = min(
+        deadline, time.monotonic() + ROUTE_ENRICHMENT_TIMEOUT_SECONDS
+    )
+    responses: queue.Queue = queue.Queue(maxsize=1)
+    request_candidate = dict(candidate)
+    request_config = {**config, "request_deadline": attempt_deadline}
+
+    def fetch() -> None:
+        try:
+            responses.put((_fetch_fr24_summary_route(request_candidate, request_config), None))
+        except Exception as exc:
+            responses.put((None, exc))
+
+    threading.Thread(target=fetch, daemon=True).start()
+    try:
+        enriched, error = responses.get(timeout=_remaining_request_time(attempt_deadline))
+    except (queue.Empty, ProviderError):
+        return candidate
+    if error is not None or not isinstance(enriched, dict):
+        return candidate
+    return enriched
 
 
 def _fetch_flightaware(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -666,7 +1005,10 @@ def _fetch_flightaware(config: dict[str, Any]) -> list[dict[str, Any]]:
     for north, south, west, east in bounding_boxes(config["latitude"], config["longitude"], config["radius_nm"]):
         query = f"{{range lat {south:.6f} {north:.6f}}} {{range lon {west:.6f} {east:.6f}}} {{true inAir}}"
         params = urllib.parse.urlencode({"query": query, "max_pages": 1})
-        payload = _fetch_json(f"{FLIGHTAWARE_URL}?{params}", {"x-apikey": api_key})
+        payload = _fetch_json(
+            f"{FLIGHTAWARE_URL}?{params}", {"x-apikey": api_key},
+            deadline=config["request_deadline"],
+        )
         all_candidates.extend(normalize_flightaware(payload))
     return all_candidates
 
@@ -826,15 +1168,19 @@ def _route_token(value: Any) -> str:
 def _route_record(candidate: Any, now: datetime) -> dict[str, str] | None:
     if not isinstance(candidate, dict):
         return None
+    identity = _flight_identity(candidate.get("callsign")) or _flight_identity(
+        candidate.get("flight")
+    )
     fields = {
-        key: _route_token(candidate.get(key))
-        for key in ("callsign", "registration", "origin", "destination")
+        "callsign": identity[0] if identity else "",
+        "registration": _route_token(candidate.get("registration")),
+        "origin": _route_token(candidate.get("origin")),
+        "destination": _route_token(candidate.get("destination")),
     }
     if candidate.get("registration") and not fields["registration"]:
         return None
     # A tail number identifies an aircraft, not a flight. Never retain its route.
-    if (not re.fullmatch(r"[A-Z]{3}[0-9][A-Z0-9]*", fields["callsign"])
-            or fields["callsign"] == fields["registration"]
+    if (not fields["callsign"] or fields["callsign"] == fields["registration"]
             or not fields["origin"] or not fields["destination"]):
         return None
     source = candidate.get("source")
@@ -864,7 +1210,10 @@ def _retain_route(
         return _route_record(candidate, now)
     if not saved or saved["source"] not in providers:
         return saved
-    callsign = _route_token(candidate.get("callsign"))
+    identity = _flight_identity(candidate.get("callsign")) or _flight_identity(
+        candidate.get("flight")
+    )
+    callsign = identity[0] if identity else ""
     registration = _route_token(candidate.get("registration"))
     if callsign != saved["callsign"] or callsign == registration:
         return saved
@@ -979,6 +1328,7 @@ def _base_result(config: dict[str, Any] | None, now: datetime) -> dict[str, Any]
 def run(input: dict[str, Any]) -> dict[str, Any]:
     """TRMNL serverless entrypoint."""
 
+    request_deadline = time.monotonic() + PAID_PROVIDER_BUDGET_SECONDS
     now = _now_utc()
     saved_route = _saved_route(input, now)
     route_state = {"last_route": saved_route} if saved_route else {}
@@ -1008,10 +1358,8 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             continue
 
         try:
-            if provider == "flightradar24":
-                candidates = _fetch_fr24(config)
-            elif provider == "flightaware":
-                candidates = _fetch_flightaware(config)
+            if provider in ("flightradar24", "flightaware"):
+                candidates = _fetch_provider(provider, config, request_deadline)
             else:
                 candidates = normalize_adsblol(input)
             any_successful_response = True
@@ -1029,6 +1377,9 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             continue
 
         saved_route = _retain_route(nearest, saved_route, providers, now)
+        if not (nearest.get("origin") and nearest.get("destination")):
+            nearest = _try_fr24_summary_route(nearest, config, request_deadline)
+            saved_route = _retain_route(nearest, saved_route, providers, now)
         result["trmnl_state"] = {"last_route": saved_route} if saved_route else {}
         aircraft = _format_aircraft(nearest)
         result.update(

@@ -1,5 +1,8 @@
 {% comment %}
-The hosted Python transform consumes these custom settings without exposing
-their values in rendered markup: fr24_api_token, flightaware_api_key,
-provider_order, max_age_minutes, location_label, map_up_bearing_deg.
+The hosted Python transform reads custom fields and returns display-ready data.
+API credentials (fr24_api_token, flightaware_api_key) never enter rendered markup.
+Paid-provider requests only run when their credentials are present, within a
+shared time budget; ADSB.lol is already fetched by polling before the transform.
+provider_order and max_age_minutes control selection. location_label and
+map_up_bearing_deg become the display label and normalized scope fields.
 {% endcomment %}
