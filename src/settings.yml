@@ -6,6 +6,7 @@ static_data: ''
 polling_verb: get
 framework_version: latest
 serverless_language: python
+refresh_interval_floor:
 polling_url: 'https://api.adsb.lol/v2/point/{% if lat_lon != blank %}{{ lat_lon | split: '','' | first | strip }}/{{ lat_lon | split: '','' | last | strip }}{% else %}{{ latitude }}/{{ longitude }}{% endif %}/{{ radius_nm }}'
 polling_headers: Accept=application/json
 polling_body: ''
@@ -101,10 +102,7 @@ custom_fields:
 - keyname: author_bio
   name: About This Plugin
   field_type: author_bio
-  description: >-
-    Built by Barrett in NorCal. Identifies overhead flying objects from public and paid data sources.
-    For support, open an issue on <a href="https://github.com/brwoodside/trmnl-flight-tracker/issues" target="_blank" rel="noopener noreferrer">GitHub</a>.
-    Follow <a href="https://x.com/exploreml" target="_blank" rel="noopener noreferrer">@exploreml on X</a>.
+  description: Built by Barrett in NorCal. Identifies overhead flying objects from public and paid data sources. For support, open an issue on <a href="https://github.com/brwoodside/trmnl-flight-tracker/issues" target="_blank" rel="noopener noreferrer">GitHub</a>. Follow <a href="https://x.com/exploreml" target="_blank" rel="noopener noreferrer">@exploreml on X</a>.
   category: travel
   github_url: https://github.com/brwoodside/trmnl-flight-tracker
 name: Overhead Flight Tracker
