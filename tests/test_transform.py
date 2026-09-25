@@ -139,6 +139,34 @@ class RequestBudgetTests(unittest.TestCase):
                 release.set()
                 self.assertTrue(finished.wait(1))
 
+    def test_optional_route_enrichment_cannot_overrun_its_deadline(self):
+        release = threading.Event()
+        finished = threading.Event()
+        candidate = transform.normalize_fr24(fixture("fr24.json"))[0]
+        candidate.update(origin=None, destination=None)
+
+        def stall(*args, **kwargs):
+            try:
+                release.wait(2)
+                return candidate
+            finally:
+                finished.set()
+
+        with mock.patch.object(transform, "_fetch_fr24_summary_route", side_effect=stall):
+            try:
+                start = time.monotonic()
+                result = transform._try_fr24_summary_route(
+                    candidate,
+                    {"fr24_api_token": "token"},
+                    time.monotonic() + 0.03,
+                )
+                self.assertIs(result, candidate)
+                self.assertLess(time.monotonic() - start, 0.5)
+                self.assertFalse(finished.is_set())
+            finally:
+                release.set()
+                self.assertTrue(finished.wait(1))
+
     def test_stalled_worker_does_not_hold_process_open(self):
         code = f"""
 import importlib.util, json, time
@@ -237,6 +265,20 @@ class NormalizationTests(unittest.TestCase):
                 payload["ac"][0]["flight"] = callsign
                 self.assertEqual(transform.normalize_adsblol(payload)[0]["operator"], expected)
 
+    def test_adsblol_resolves_iata_flight_numbers_from_callsign(self):
+        cases = {
+            "UA1083 ": "United Airlines",
+            " as924 ": "Alaska Airlines",
+            "B6410": "JetBlue Airways",
+            "5X123": "UPS Airlines",
+            "OO410Z": "SkyWest Airlines",
+        }
+        for callsign, expected in cases.items():
+            with self.subTest(callsign=callsign):
+                payload = fixture("adsblol.json")
+                payload["ac"][0]["flight"] = callsign
+                self.assertEqual(transform.normalize_adsblol(payload)[0]["operator"], expected)
+
     def test_adsblol_preserves_provider_name_over_callsign(self):
         payload = fixture("adsblol.json")
         payload["ac"][0]["ownOp"] = "  Custom Aircraft Operator  "
@@ -250,7 +292,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(transform.normalize_adsblol(payload)[0]["operator"], "United Airlines")
 
     def test_unrecognized_or_nonflight_callsigns_remain_unavailable(self):
-        for callsign in (None, "", "  ", "N123UA", "C-FABC", "ZZZ123", "UA123", "UAL",
+        for callsign in (None, "", "  ", "N123UA", "C-FABC", "ZZZ123", "UAL",
                          "UALTEST", "UAL123456", "UAL123!", "UAL 123", "UAL１２３"):
             with self.subTest(callsign=callsign):
                 payload = fixture("adsblol.json")
@@ -276,6 +318,13 @@ class NormalizationTests(unittest.TestCase):
         payload = fixture("fr24.json")
         payload["data"][0].update(operating_as=" ", painted_as="UAL", callsign="SKW410Z")
         self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], "SkyWest Airlines")
+
+    def test_fr24_iata_flight_identifies_airline_when_callsign_is_missing(self):
+        payload = fixture("fr24.json")
+        payload["data"][0].update(
+            operating_as=None, painted_as=None, callsign=None, flight="UA123"
+        )
+        self.assertEqual(transform.normalize_fr24(payload)[0]["operator"], "United Airlines")
 
     def test_fr24_livery_is_last_resort(self):
         payload = fixture("fr24.json")
@@ -415,6 +464,65 @@ class RunTests(unittest.TestCase):
         self.assertEqual(request_headers["Authorization"], "Bearer fr24-secret")
         self.assertEqual(result["aircraft"]["operator"], "Scandinavian Airlines")
         self.assertEqual(request_headers["Accept-Version"], "v1")
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_fr24_summary_fills_a_missing_route_and_operator(self):
+        live = fixture("fr24.json")
+        live["data"][0].update(
+            flight=None,
+            callsign=None,
+            operating_as=None,
+            painted_as=None,
+            orig_iata="SFO",
+            orig_icao="KSFO",
+            dest_iata=None,
+            dest_icao=None,
+        )
+        summary = {
+            "data": [{
+                "fr24_id": live["data"][0]["fr24_id"],
+                "flight": "UA123",
+                "callsign": "UAL123",
+                "operating_as": "UAL",
+                "reg": "N123UA",
+                "type": "B738",
+                "orig_icao": "KSFO",
+                "dest_icao": "KSEA",
+            }]
+        }
+
+        def fake_fetch(url, headers=None, **kwargs):
+            return summary if url.startswith(transform.FR24_SUMMARY_URL) else live
+
+        with mock.patch.object(transform, "_fetch_json", side_effect=fake_fetch) as fetch:
+            result = transform.run(
+                plugin_input(fixture("adsblol.json"), fr24_api_token="fr24-secret")
+            )
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(result["provider_used"], "flightradar24")
+        self.assertEqual(result["aircraft"]["route"], "SFO → KSEA")
+        self.assertEqual(result["aircraft"]["operator"], "United Airlines")
+        self.assertTrue(result["aircraft"]["route_enriched"])
+        self.assertEqual(result["trmnl_state"]["last_route"]["callsign"], "UAL123")
+
+    def test_fr24_summary_failure_keeps_the_position_usable(self):
+        live = fixture("fr24.json")
+        live["data"][0].update(
+            orig_iata=None, orig_icao=None, dest_iata=None, dest_icao=None
+        )
+
+        def fake_fetch(url, headers=None, **kwargs):
+            if url.startswith(transform.FR24_SUMMARY_URL):
+                raise transform.ProviderError("summary unavailable")
+            return live
+
+        with mock.patch.object(transform, "_fetch_json", side_effect=fake_fetch):
+            result = transform.run(
+                plugin_input(fixture("adsblol.json"), fr24_api_token="fr24-secret")
+            )
+        self.assertTrue(result["has_aircraft"])
+        self.assertEqual(result["provider_used"], "flightradar24")
+        self.assertEqual(result["aircraft"]["route"], "Route unavailable")
 
     def test_flightaware_is_used_after_fr24_error(self):
         def fake_fetch(url, headers=None, **kwargs):
@@ -605,6 +713,19 @@ class RouteRetentionTests(unittest.TestCase):
         self.assertFalse(result["aircraft"]["route_retained"])
         self.assertEqual(result["trmnl_state"]["last_route"]["source"], "flightaware")
 
+    def test_saved_route_avoids_a_repeated_fr24_summary_charge(self):
+        state = self.first_result()["trmnl_state"]
+        self.fr24["data"][0].update(
+            orig_iata=None, orig_icao=None, dest_iata=None, dest_icao=None
+        )
+        data = plugin_input(fixture("adsblol.json"), fr24_api_token="token")
+        data["trmnl"]["state"] = state
+        with mock.patch.object(transform, "_fetch_json", return_value=self.fr24) as fetch:
+            result = transform.run(data)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertTrue(result["aircraft"]["route_retained"])
+        self.assertEqual(result["aircraft"]["route"], "SFO → SEA")
+
     def test_conflicting_partial_route_invalidates_saved_route(self):
         first = self.first_result()
         self.fa["flights"][0]["destination"] = None
@@ -651,14 +772,36 @@ class RouteRetentionTests(unittest.TestCase):
         payload["ac"][0].update(flight=" ual123 ", r="N-123UA")
         self.assertTrue(self.fallback(state, payload)["aircraft"]["route_retained"])
 
+    def test_iata_and_icao_flight_numbers_share_one_route_identity(self):
+        state = self.first_result()["trmnl_state"]
+        payload = fixture("adsblol.json")
+        payload["ac"][0]["flight"] = "UA123"
+        result = self.fallback(state, payload)
+        self.assertTrue(result["aircraft"]["route_retained"])
+        self.assertEqual(result["aircraft"]["route"], "SFO → SEA")
+        self.assertEqual(result["aircraft"]["operator"], "United Airlines")
+
+    def test_iata_only_paid_record_is_saved_and_matches_icao_fallback(self):
+        self.fr24["data"][0].update(
+            callsign=None,
+            flight="UA123",
+            operating_as=None,
+            painted_as=None,
+        )
+        first = self.first_result()
+        self.assertEqual(first["trmnl_state"]["last_route"]["callsign"], "UAL123")
+        result = self.fallback(first["trmnl_state"])
+        self.assertTrue(result["aircraft"]["route_retained"])
+        self.assertEqual(result["aircraft"]["route"], "SFO → SEA")
+
     def test_missing_tail_allows_callsign_match(self):
         state = self.first_result()["trmnl_state"]
         payload = fixture("adsblol.json")
         payload["ac"][0].pop("r")
         self.assertTrue(self.fallback(state, payload)["aircraft"]["route_retained"])
 
-    def test_tail_number_callsigns_are_not_saved(self):
-        self.fr24["data"][0].update(callsign="N123UA")
+    def test_tail_number_callsigns_without_a_flight_number_are_not_saved(self):
+        self.fr24["data"][0].update(callsign="N123UA", flight=None)
         self.assertEqual(self.first_result()["trmnl_state"], {})
 
     def test_expired_and_future_routes_are_discarded(self):

@@ -50,6 +50,15 @@ already-polled ADSB.lol fallback and formatting. Slow paid responses can therefo
 cause fallback even if the provider would eventually succeed. Without credentials,
 paid requests and workers are skipped entirely.
 
+When FR24 selects a position with a flight ID but no complete route, and saved
+state cannot fill it, the transform makes one same-provider Flight Summary Light
+request bounded to 0.8 seconds inside the existing three-second budget. A
+successful route is saved, so later refreshes for that flight do not repeat the
+summary lookup. Failure is non-fatal and leaves the live position intact. FR24
+currently prices a returned live light summary at one credit (and an empty query
+at one processing credit), so this can add one credit for a newly encountered
+route-less FR24 flight.
+
 The transform retains one recent route in TRMNL's per-install
 [saved state](https://help.trmnl.com/en/articles/16777795-saved-state), using
 `input.trmnl.state` and the returned `trmnl_state` object. Only the flight
@@ -74,12 +83,18 @@ saved. Each screen contains the selected aircraft and small diagnostic metadata.
 - Fall through to the next provider if the current source errors or has no
   usable aircraft.
 - If the selected provider has an incomplete route, reuse the last complete route
-  from the same or a higher-priority provider for the same ICAO flight callsign.
+  from the same or a higher-priority provider for the same flight. Three-letter
+  ICAO callsigns and two-character IATA flight numbers are normalized to one
+  ICAO-style identity, so `UAL123` and `UA123` match across provider switches.
   Callsigns are case-insensitive; conflicting registrations or known endpoints
-  prevent reuse. Tail-number callsigns never qualify, and an available live
-  route always wins. Current position and telemetry still come from the selected
-  provider; `aircraft.route_source` and `aircraft.route_retained` identify the
-  route's provenance.
+  prevent reuse. A tail number by itself never qualifies, while a separate valid
+  marketing flight number can. An available live route always wins. Current
+  position and telemetry still come from the selected provider;
+  `aircraft.route_source` and `aircraft.route_retained` identify the route's
+  provenance.
+- If no retained route matches a selected FR24 position, use its `fr24_id` for
+  the bounded same-provider light-summary lookup described above. Conflicting
+  live and summary endpoints are rejected rather than combined.
 - Retained routes expire two hours after their original observation, even during
   repeated fallback refreshes. Empty/error refreshes preserve an unexpired route.
   Only the most recent complete route is retained, so this is not a flight-history
@@ -313,26 +328,28 @@ derived database may create additional ODbL obligations.
 
 The transform resolves airline names locally, with no extra API calls or
 credentials. It first preserves a supplied operator name or expands a known
-ICAO operator code. When that field is missing, it looks up the three-letter
-prefix of a flight callsign such as `UAL1083` (United Airlines), `ASA924`
-(Alaska Airlines), or `SKW410Z` (SkyWest Airlines). FR24's painted/livery airline
-is used only when neither the operating airline nor callsign resolves.
+ICAO or IATA operator code. When that field is missing, it recognizes both
+three-letter ICAO callsigns such as `UAL1083` and two-character IATA flight
+numbers such as `UA1083`, `B6410`, or `5X123`. FR24's separate marketing-flight
+field is also checked when its operational callsign is absent. FR24's
+painted/livery airline is used only when neither the operating airline nor a
+flight identifier resolves.
 
-ADSB.lol's optional `ownOp` field is often absent; the callsign fallback works
-without it. FlightAware uses `operator_icao` or `operator` when supplied,
-otherwise its ICAO callsign. FR24's `operating_as` and `painted_as` codes are
-expanded through the same map.
+ADSB.lol's optional `ownOp` field is often absent; the flight-identifier fallback
+works without it. FlightAware uses `operator_icao` or `operator` when supplied,
+otherwise its ICAO or IATA identifier. FR24's `operating_as` and `painted_as`
+codes are expanded through the same map.
 
-The compact `AIRLINE_NAMES` map in `src/transform.py` covers common passenger,
-regional, cargo, and charter operators. ICAO assignments were checked against
+The compact `AIRLINE_NAMES` and `IATA_TO_ICAO` maps in `src/transform.py` cover
+common passenger, regional, cargo, and charter operators. ICAO assignments were checked against
 the [FAA company designator table](https://www.faa.gov/air_traffic/publications/atpubs/cnt_html/chap3_section_3.html).
 Names describe the operating carrier, which can differ from the ticketed brand.
 This is not a complete or automatically updated airline directory: unknown
 explicit operator codes stay visible, and unknown callsigns remain unavailable.
-Callsign inference requires three letters followed by a digit and up to four
-more letters/digits; registrations, bare prefixes, and IATA flight numbers are
-not used to guess an airline. New assignments can be added to the map with a
-regression test.
+Flight inference requires either three ICAO letters or a known two-character
+IATA code followed by a numeric flight-number start; registrations and bare
+prefixes are not used to guess an airline. New assignments can be added to the
+maps with a regression test.
 
 ### Aircraft name resolution
 
