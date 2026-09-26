@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 
@@ -898,11 +898,29 @@ def _fetch_fr24(config: dict[str, Any]) -> list[dict[str, Any]]:
 def _fetch_fr24_summary_route(
     candidate: dict[str, Any], config: dict[str, Any]
 ) -> dict[str, Any]:
-    """Fill a selected FR24 record from its same-provider light summary."""
-    flight_id = _clean_text(candidate.get("provider_flight_id"))
-    if not flight_id:
-        return candidate
-    params = urllib.parse.urlencode({"flight_ids": flight_id, "limit": 1})
+    """Fetch a route by FR24 ID, or the selected aircraft's current callsign."""
+    flight_id = (
+        _clean_text(candidate.get("provider_flight_id"))
+        if candidate.get("source") == "flightradar24" else None
+    )
+    now = _now_utc()
+    if flight_id:
+        query = {"flight_ids": flight_id, "limit": 1}
+    else:
+        identity = _flight_identity(candidate.get("callsign")) or _flight_identity(
+            candidate.get("flight")
+        )
+        if not identity or identity[0] == _route_token(candidate.get("registration")):
+            return candidate
+        # Summary time ranges filter first_seen, so include long-haul flights.
+        # Validate last_seen and flight_ended below to exclude previous legs.
+        query = {
+            "callsigns": identity[0],
+            "flight_datetime_from": (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "flight_datetime_to": now.strftime("%Y-%m-%dT%H:%M:%S"),
+            "limit": 5,
+        }
+    params = urllib.parse.urlencode(query)
     payload = _fetch_json(
         f"{FR24_SUMMARY_URL}?{params}",
         {
@@ -911,14 +929,33 @@ def _fetch_fr24_summary_route(
         },
         deadline=config["request_deadline"],
     )
-    summary = next(
-        (
-            row
-            for row in payload.get("data") or []
-            if isinstance(row, dict) and _clean_text(row.get("fr24_id")) == flight_id
-        ),
-        None,
-    )
+    matches = []
+    for row in payload.get("data") or []:
+        if not isinstance(row, dict):
+            continue
+        if flight_id:
+            if _clean_text(row.get("fr24_id")) == flight_id:
+                matches.append(row)
+            continue
+        first_seen = _parse_time(row.get("first_seen"))
+        last_seen = _parse_time(row.get("last_seen"))
+        if (
+            row.get("flight_ended") not in (False, "false")
+            or row.get("datetime_landed")
+            or first_seen is None or last_seen is None
+            or not first_seen <= last_seen <= now
+            or first_seen < now - timedelta(hours=24)
+            or (now - last_seen).total_seconds() > config["max_age_minutes"] * 60
+        ):
+            continue
+        route_identity = {
+            "callsign": row.get("callsign"), "flight": row.get("flight"),
+            "registration": row.get("reg"),
+        }
+        if _same_live_flight(candidate, route_identity):
+            matches.append(row)
+    # Ambiguous active legs must not be resolved by array order.
+    summary = matches[0] if len(matches) == 1 else None
     if summary is None:
         return candidate
 
@@ -936,8 +973,8 @@ def _fetch_fr24_summary_route(
         current_code = _route_token(current)
         replacement_code = _route_token(replacement)
         # Light summaries use ICAO airport codes while live records prefer IATA.
-        # Only reject a same-code-system conflict; the fr24_id already identifies
-        # the exact flight across the two same-provider responses.
+        # Only reject a same-code-system conflict; flight ID or the validated
+        # active-flight identity above binds the summary to this aircraft.
         if (
             current_code
             and replacement_code
@@ -966,19 +1003,28 @@ def _fetch_fr24_summary_route(
             summary.get("painted_as"),
             enriched.get("flight"),
         )
-    enriched["route_enriched"] = bool(
-        enriched.get("origin") and enriched.get("destination")
-    )
+    filled = any(enriched.get(key) and not candidate.get(key) for key in ("origin", "destination"))
+    if filled:
+        enriched["route_enriched"] = True
+        enriched["route_source"] = "flightradar24"
+        if not enriched.get("route_observed_at"):
+            enriched["route_observed_at"] = (_parse_time(summary.get("last_seen")) or now).isoformat()
     return enriched
 
 
 def _try_fr24_summary_route(
-    candidate: dict[str, Any], config: dict[str, Any], deadline: float
+    candidate: dict[str, Any], config: dict[str, Any], deadline: float,
+    attempts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Bound optional route enrichment so it can never delay ADSB fallback."""
     if (
-        candidate.get("source") != "flightradar24"
-        or not candidate.get("provider_flight_id")
+        not config.get("fr24_api_token")
+        or config.get("provider_order") == "open_only"
+        or not (
+            (candidate.get("source") == "flightradar24" and candidate.get("provider_flight_id"))
+            or _flight_identity(candidate.get("callsign"))
+            or _flight_identity(candidate.get("flight"))
+        )
         or time.monotonic() >= deadline
     ):
         return candidate
@@ -997,12 +1043,20 @@ def _try_fr24_summary_route(
             responses.put((None, exc))
 
     threading.Thread(target=fetch, daemon=True).start()
+    def report(status: str, detail: str) -> None:
+        if attempts is not None:
+            attempts.append({"provider": "flightradar24", "status": status, "detail": detail})
+
     try:
         enriched, error = responses.get(timeout=_remaining_request_time(attempt_deadline))
     except (queue.Empty, ProviderError):
+        report("route_error", "FR24 summary time budget exhausted")
         return candidate
     if error is not None or not isinstance(enriched, dict):
+        report("route_error", str(error) if isinstance(error, ProviderError) else "FR24 summary unavailable")
         return candidate
+    filled = any(enriched.get(key) and not candidate.get(key) for key in ("origin", "destination"))
+    report("route_enriched" if filled else "route_miss", "FR24 flight summary")
     return enriched
 
 
@@ -1180,7 +1234,7 @@ def _route_record(candidate: Any, now: datetime) -> dict[str, str] | None:
     )
     fields = {
         "callsign": identity[0] if identity else "",
-        "registration": _route_token(candidate.get("registration")),
+        "registration": _route_token(candidate.get("registration") or candidate.get("route_registration")),
         "origin": _route_token(candidate.get("origin")),
         "destination": _route_token(candidate.get("destination")),
     }
@@ -1195,7 +1249,7 @@ def _route_record(candidate: Any, now: datetime) -> dict[str, str] | None:
             or not (fields["origin"] or fields["destination"])):
         return None
     source = candidate.get("route_source") or candidate.get("source")
-    observed_at = _parse_time(candidate.get("observed_at"))
+    observed_at = _parse_time(candidate.get("route_observed_at") or candidate.get("observed_at"))
     if source not in ("flightradar24", "flightaware", "adsblol") or observed_at is None:
         return None
     if not 0 <= (now - observed_at).total_seconds() < ROUTE_MAX_AGE_SECONDS:
@@ -1216,7 +1270,8 @@ def _retain_route(
     candidate.setdefault("route_retained", False)
     complete_route = bool(candidate.get("origin") and candidate.get("destination"))
     if candidate.get("origin") or candidate.get("destination"):
-        candidate.setdefault("route_source", candidate["source"])
+        if not candidate.get("route_source"):
+            candidate["route_source"] = candidate["source"]
     else:
         candidate.setdefault("route_source", None)
     if complete_route:
@@ -1244,8 +1299,10 @@ def _retain_route(
     if filled:
         candidate["route_source"] = saved["source"]
         candidate["route_retained"] = True
+        candidate["route_observed_at"] = saved["observed_at"]
+        candidate["route_registration"] = saved["registration"]
     # Reusing the route must not renew its expiry on every fallback refresh.
-    return saved if filled else (_route_record(candidate, now) or saved)
+    return _route_record(candidate, now) or saved
 
 
 def _same_live_flight(primary: dict[str, Any], secondary: dict[str, Any]) -> bool:
@@ -1454,6 +1511,13 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
     result = _base_result(config, now)
     result["trmnl_state"] = route_state
     providers = _provider_sequence(config)
+    # Leave a bounded slice for a targeted route lookup after position-provider
+    # failures; otherwise two slow searches consume the entire shared budget.
+    position_deadline = request_deadline
+    if config["fr24_api_token"] and config["provider_order"] != "open_only":
+        position_deadline -= min(
+            ROUTE_ENRICHMENT_TIMEOUT_SECONDS, PAID_PROVIDER_BUDGET_SECONDS / 3
+        )
     provider_candidates: dict[str, list[dict[str, Any]]] = {}
     any_successful_response = False
 
@@ -1471,7 +1535,7 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
 
         try:
             if provider in ("flightradar24", "flightaware"):
-                candidates = _fetch_provider(provider, config, request_deadline)
+                candidates = _fetch_provider(provider, config, position_deadline)
             else:
                 candidates = normalize_adsblol(input)
             provider_candidates[provider] = candidates
@@ -1490,8 +1554,12 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             continue
 
         saved_route = _retain_route(nearest, saved_route, now)
-        if not (nearest.get("origin") and nearest.get("destination")):
-            nearest = _try_fr24_summary_route(nearest, config, request_deadline)
+        summary_attempted = False
+        if nearest["source"] == "flightradar24" and not (
+            nearest.get("origin") and nearest.get("destination")
+        ):
+            summary_attempted = True
+            nearest = _try_fr24_summary_route(nearest, config, request_deadline, result["provider_attempts"])
             saved_route = _retain_route(nearest, saved_route, now)
 
         result["provider_attempts"].append(
@@ -1520,7 +1588,7 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                         continue
                     elif route_provider in ("flightradar24", "flightaware"):
                         route_candidates = _fetch_provider(
-                            route_provider, config, request_deadline
+                            route_provider, config, position_deadline
                         )
                     else:
                         route_candidates = normalize_adsblol(input)
@@ -1547,11 +1615,12 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                         }
                     )
                     continue
-                if not (
+                if route_candidate["source"] == "flightradar24" and not (
                     route_candidate.get("origin") and route_candidate.get("destination")
                 ):
+                    summary_attempted = True
                     route_candidate = _try_fr24_summary_route(
-                        route_candidate, config, request_deadline
+                        route_candidate, config, request_deadline, result["provider_attempts"]
                     )
                 filled = _merge_live_route(nearest, route_candidate)
                 result["provider_attempts"].append(
@@ -1564,6 +1633,14 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                 saved_route = _retain_route(nearest, saved_route, now)
                 if nearest.get("origin") and nearest.get("destination"):
                     break
+
+        if not summary_attempted and not (
+            nearest.get("origin") and nearest.get("destination")
+        ):
+            nearest = _try_fr24_summary_route(
+                nearest, config, request_deadline, result["provider_attempts"]
+            )
+            saved_route = _retain_route(nearest, saved_route, now)
 
         result["trmnl_state"] = {"last_route": saved_route} if saved_route else {}
         aircraft = _format_aircraft(nearest)
