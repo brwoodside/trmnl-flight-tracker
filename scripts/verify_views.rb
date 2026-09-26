@@ -63,7 +63,10 @@ begin
         File.write("#{basename}.html", html)
         # Full device matrix for normal content and radar rotation; error-state
         # screenshots exercise the changed quadrant. All states render to HTML.
-        next unless render_png && (scenario == 'aircraft' || (scenario == 'rotated' && view == 'full') || (scenario != 'rotated' && view == 'quadrant'))
+        render_screenshot = %w[aircraft partial_route].include?(scenario) ||
+                            (scenario == 'rotated' && view == 'full') ||
+                            (!%w[rotated partial_route].include?(scenario) && view == 'quadrant')
+        next unless render_png && render_screenshot
 
         image = TRMNLP::ScreenGenerator.new(html, screenshot: screenshot, width: width,
                                            height: height, color_depth: depth).process

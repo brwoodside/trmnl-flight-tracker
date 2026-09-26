@@ -13,7 +13,9 @@ The provider chain is:
 
 `FlightAware first` and `ADSB.lol only` modes are also available. Commercial
 provider failures, rate limits, stale results, or empty results fall through to
-the next source without breaking the display.
+the next source without breaking the display. Provider priority controls the
+aircraft's position and telemetry; it does not prevent a lower-priority source
+from supplying missing route fields for the same live flight.
 
 ## Architecture
 
@@ -59,7 +61,16 @@ currently prices a returned live light summary at one credit (and an empty query
 at one processing credit), so this can add one credit for a newly encountered
 route-less FR24 flight.
 
-The transform retains one recent route in TRMNL's per-install
+If that still leaves either endpoint missing, the transform reuses already-fetched
+provider responses and conditionally checks the remaining configured providers
+within the same three-second budget. It keeps
+the selected provider's position and telemetry, finds the same live flight by
+canonical ICAO/IATA flight identity or a non-conflicting registration, and fills
+only missing route fields. A lower paid provider is therefore queried only when
+the selected aircraft still has an incomplete route; its normal API usage and
+pricing apply.
+
+The transform retains one recent complete or partial route in TRMNL's per-install
 [saved state](https://help.trmnl.com/en/articles/16777795-saved-state), using
 `input.trmnl.state` and the returned `trmnl_state` object. Only the flight
 callsign, registration (when supplied), airports, route provider, and original
@@ -82,26 +93,30 @@ saved. Each screen contains the selected aircraft and small diagnostic metadata.
   track. When neither is available, show a position dot instead of implying a direction.
 - Fall through to the next provider if the current source errors or has no
   usable aircraft.
-- If the selected provider has an incomplete route, reuse the last complete route
-  from the same or a higher-priority provider for the same flight. Three-letter
+- If the selected provider has an incomplete route, reuse matching saved fields
+  and already-fetched responses from any provider, then conditionally inspect
+  lower-priority live responses for the same flight. Three-letter
   ICAO callsigns and two-character IATA flight numbers are normalized to one
   ICAO-style identity, so `UAL123` and `UA123` match across provider switches.
   Callsigns are case-insensitive; conflicting registrations or known endpoints
-  prevent reuse. A tail number by itself never qualifies, while a separate valid
-  marketing flight number can. An available live route always wins. Current
-  position and telemetry still come from the selected provider;
+  prevent unsafe reuse. Known fields are never overwritten: origin and destination
+  are filled independently, so a partial result is displayed as `SFO → —` or
+  `— → SEA` instead of “Route unavailable.” A tail number by itself never
+  qualifies for saved-state retention, while a separate valid marketing flight
+  number can. An available live route always wins. Current position and telemetry
+  still come from the selected provider;
   `aircraft.route_source` and `aircraft.route_retained` identify the route's
   provenance.
 - If no retained route matches a selected FR24 position, use its `fr24_id` for
   the bounded same-provider light-summary lookup described above. Conflicting
   live and summary endpoints are rejected rather than combined.
-- Retained routes expire two hours after their original observation, even during
+- Retained route fields expire two hours after their original observation, even during
   repeated fallback refreshes. Empty/error refreshes preserve an unexpired route.
-  Only the most recent complete route is retained, so this is not a flight-history
-  cache. Without a prior qualifying route, the display still says “Route unavailable.”
+  Only the most recent route is retained, so this is not a flight-history cache.
+  The display says “Route unavailable” only when neither endpoint is known.
 
 Saved state starts empty after installation. The hosted transform must first see
-one complete route before it can retain it across a provider switch. Local
+at least one route endpoint before it can retain it across a provider switch. Local
 `trmnlp` previews do not currently carry state between builds; the unit tests
 replay the hosted `trmnl_state` → `trmnl.state` contract explicitly.
 

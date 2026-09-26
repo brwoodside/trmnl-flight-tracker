@@ -852,6 +852,13 @@ def normalize_adsblol(payload: dict[str, Any]) -> list[dict[str, Any]]:
             aircraft_type=row.get("t"),
             aircraft_name=row.get("desc"),
             operator=row.get("ownOp"),
+            # The current ADSB.lol point endpoint normally omits route fields,
+            # but preserve them if a compatible response or fixture supplies
+            # them so route enrichment remains provider-neutral.
+            origin=_coalesce(row.get("orig_iata"), row.get("orig_icao"), row.get("origin")),
+            destination=_coalesce(
+                row.get("dest_iata"), row.get("dest_icao"), row.get("destination")
+            ),
             latitude=row.get("lat"),
             longitude=row.get("lon"),
             altitude_ft=altitude,
@@ -1179,13 +1186,17 @@ def _route_record(candidate: Any, now: datetime) -> dict[str, str] | None:
     }
     if candidate.get("registration") and not fields["registration"]:
         return None
-    # A tail number identifies an aircraft, not a flight. Never retain its route.
-    if (not fields["callsign"] or fields["callsign"] == fields["registration"]
-            or not fields["origin"] or not fields["destination"]):
+    if any(candidate.get(key) and not fields[key] for key in ("origin", "destination")):
         return None
-    source = candidate.get("source")
+    # A tail number identifies an aircraft, not a flight. Never retain its route.
+    # A single known endpoint is still useful and can be completed safely by a
+    # later matching provider response.
+    if (not fields["callsign"] or fields["callsign"] == fields["registration"]
+            or not (fields["origin"] or fields["destination"])):
+        return None
+    source = candidate.get("route_source") or candidate.get("source")
     observed_at = _parse_time(candidate.get("observed_at"))
-    if source not in ("flightradar24", "flightaware") or observed_at is None:
+    if source not in ("flightradar24", "flightaware", "adsblol") or observed_at is None:
         return None
     if not 0 <= (now - observed_at).total_seconds() < ROUTE_MAX_AGE_SECONDS:
         return None
@@ -1199,36 +1210,127 @@ def _saved_route(input: dict[str, Any], now: datetime) -> dict[str, str] | None:
 
 
 def _retain_route(
-    candidate: dict[str, Any], saved: dict[str, str] | None,
-    providers: list[str], now: datetime,
+    candidate: dict[str, Any], saved: dict[str, str] | None, now: datetime,
 ) -> dict[str, str] | None:
-    """Fill missing route metadata without replacing current position or live route."""
-    candidate["route_retained"] = False
+    """Fill missing route fields from matching state without replacing live fields."""
+    candidate.setdefault("route_retained", False)
     complete_route = bool(candidate.get("origin") and candidate.get("destination"))
-    candidate["route_source"] = candidate["source"] if complete_route else None
+    if candidate.get("origin") or candidate.get("destination"):
+        candidate.setdefault("route_source", candidate["source"])
+    else:
+        candidate.setdefault("route_source", None)
     if complete_route:
         return _route_record(candidate, now)
-    if not saved or saved["source"] not in providers:
-        return saved
+    if not saved:
+        return _route_record(candidate, now) or saved
     identity = _flight_identity(candidate.get("callsign")) or _flight_identity(
         candidate.get("flight")
     )
     callsign = identity[0] if identity else ""
     registration = _route_token(candidate.get("registration"))
     if callsign != saved["callsign"] or callsign == registration:
-        return saved
+        return _route_record(candidate, now) or saved
     if registration and saved["registration"] and registration != saved["registration"]:
-        return None
-    # A changed endpoint can indicate a new leg or a diversion. Do not splice routes.
-    if any(candidate.get(key) and _route_token(candidate[key]) != saved[key]
-           for key in ("origin", "destination")):
-        return None
-    if providers.index(saved["source"]) > providers.index(candidate["source"]):
-        return saved
-    candidate.update(origin=saved["origin"], destination=saved["destination"],
-                     route_source=saved["source"], route_retained=True)
+        return _route_record(candidate, now)
+    # A changed endpoint can indicate a new leg or a diversion. Do not splice
+    # clear conflicts; different IATA/ICAO lengths are not proof of conflict.
+    if _route_conflicts(candidate, saved):
+        return _route_record(candidate, now)
+    filled = False
+    for key in ("origin", "destination"):
+        if not candidate.get(key) and saved.get(key):
+            candidate[key] = saved[key]
+            filled = True
+    if filled:
+        candidate["route_source"] = saved["source"]
+        candidate["route_retained"] = True
     # Reusing the route must not renew its expiry on every fallback refresh.
-    return saved
+    return saved if filled else (_route_record(candidate, now) or saved)
+
+
+def _same_live_flight(primary: dict[str, Any], secondary: dict[str, Any]) -> bool:
+    """Require a non-conflicting live flight or registration identity match."""
+    primary_identity = _flight_identity(primary.get("callsign")) or _flight_identity(
+        primary.get("flight")
+    )
+    secondary_identity = _flight_identity(secondary.get("callsign")) or _flight_identity(
+        secondary.get("flight")
+    )
+    primary_callsign = primary_identity[0] if primary_identity else ""
+    secondary_callsign = secondary_identity[0] if secondary_identity else ""
+    primary_registration = _route_token(primary.get("registration"))
+    secondary_registration = _route_token(secondary.get("registration"))
+
+    if primary_callsign and secondary_callsign and primary_callsign != secondary_callsign:
+        return False
+    if (
+        primary_registration
+        and secondary_registration
+        and primary_registration != secondary_registration
+    ):
+        return False
+    callsign_match = bool(
+        primary_callsign
+        and primary_callsign == secondary_callsign
+        and primary_callsign not in (primary_registration, secondary_registration)
+    )
+    registration_match = bool(
+        primary_registration and primary_registration == secondary_registration
+    )
+    return callsign_match or registration_match
+
+
+def _route_conflicts(primary: dict[str, Any], secondary: dict[str, Any]) -> bool:
+    """Reject clear endpoint conflicts while tolerating IATA/ICAO code lengths."""
+    for key in ("origin", "destination"):
+        current = _route_token(primary.get(key))
+        replacement = _route_token(secondary.get(key))
+        if current and replacement and len(current) == len(replacement) and current != replacement:
+            return True
+    return False
+
+
+def _matching_route_candidate(
+    primary: dict[str, Any], candidates: Iterable[dict[str, Any]],
+    config: dict[str, Any], now: datetime,
+) -> dict[str, Any] | None:
+    """Find the freshest, most complete route for the selected live aircraft."""
+    matches: list[tuple[int, float, float, dict[str, Any]]] = []
+    for candidate in candidates:
+        age = _age_minutes(candidate.get("observed_at"), now)
+        if age is not None and age > config["max_age_minutes"]:
+            continue
+        if not _same_live_flight(primary, candidate) or _route_conflicts(primary, candidate):
+            continue
+        endpoint_count = int(bool(candidate.get("origin"))) + int(
+            bool(candidate.get("destination"))
+        )
+        separation = haversine_nm(
+            primary["latitude"], primary["longitude"],
+            candidate["latitude"], candidate["longitude"],
+        )
+        matches.append((-endpoint_count, age if age is not None else 0.0, separation, candidate))
+    matches.sort(key=lambda match: match[:3])
+    return matches[0][3] if matches else None
+
+
+def _merge_live_route(primary: dict[str, Any], secondary: dict[str, Any]) -> bool:
+    """Fill only missing route fields from an identity-safe live provider match."""
+    if not _same_live_flight(primary, secondary) or _route_conflicts(primary, secondary):
+        return False
+    had_endpoint = bool(primary.get("origin") or primary.get("destination"))
+    filled = False
+    for key in ("origin", "destination"):
+        if not primary.get(key) and secondary.get(key):
+            primary[key] = secondary[key]
+            filled = True
+    if filled:
+        primary["route_enriched"] = True
+        if not had_endpoint:
+            primary["route_source"] = secondary["source"]
+        else:
+            primary.setdefault("route_source", primary["source"])
+    return filled
 
 
 def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -1289,8 +1391,17 @@ def _format_aircraft(candidate: dict[str, Any]) -> dict[str, Any]:
             "Descending": "Down",
             "Level": "Level",
         }.get(candidate.get("vertical_trend"), "—"),
-        "route": f"{origin} → {destination}" if origin and destination else "Route unavailable",
-        "route_available": bool(origin and destination),
+        "route": (
+            f"{origin} → {destination}"
+            if origin and destination
+            else f"{origin} → —"
+            if origin
+            else f"— → {destination}"
+            if destination
+            else "Route unavailable"
+        ),
+        "route_available": bool(origin or destination),
+        "route_complete": bool(origin and destination),
         "aircraft_label": " · ".join(
             value for value in (aircraft_name or aircraft_type, candidate.get("registration")) if value
         )
@@ -1343,6 +1454,7 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
     result = _base_result(config, now)
     result["trmnl_state"] = route_state
     providers = _provider_sequence(config)
+    provider_candidates: dict[str, list[dict[str, Any]]] = {}
     any_successful_response = False
 
     for provider in providers:
@@ -1362,6 +1474,7 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                 candidates = _fetch_provider(provider, config, request_deadline)
             else:
                 candidates = normalize_adsblol(input)
+            provider_candidates[provider] = candidates
             any_successful_response = True
             nearest, candidate_count = _select_nearest(candidates, config, now)
         except ProviderError as exc:
@@ -1376,10 +1489,82 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
             )
             continue
 
-        saved_route = _retain_route(nearest, saved_route, providers, now)
+        saved_route = _retain_route(nearest, saved_route, now)
         if not (nearest.get("origin") and nearest.get("destination")):
             nearest = _try_fr24_summary_route(nearest, config, request_deadline)
-            saved_route = _retain_route(nearest, saved_route, providers, now)
+            saved_route = _retain_route(nearest, saved_route, now)
+
+        result["provider_attempts"].append(
+            {"provider": provider, "status": "selected", "detail": f"{candidate_count} candidates"}
+        )
+
+        # Position/telemetry stay with the highest-priority usable provider, but
+        # an incomplete route can be completed field by field from a matching
+        # aircraft in any lower-priority response. Paid route lookups remain
+        # inside the same shared request deadline.
+        if not (nearest.get("origin") and nearest.get("destination")):
+            selected_index = providers.index(provider)
+            for route_provider in providers:
+                if route_provider == provider:
+                    continue
+                if route_provider == "flightradar24" and not config["fr24_api_token"]:
+                    continue
+                if route_provider == "flightaware" and not config["flightaware_api_key"]:
+                    continue
+                try:
+                    if route_provider in provider_candidates:
+                        route_candidates = provider_candidates[route_provider]
+                    elif providers.index(route_provider) < selected_index:
+                        # A failed/skipped higher-priority request is not retried
+                        # after a lower provider has already supplied a position.
+                        continue
+                    elif route_provider in ("flightradar24", "flightaware"):
+                        route_candidates = _fetch_provider(
+                            route_provider, config, request_deadline
+                        )
+                    else:
+                        route_candidates = normalize_adsblol(input)
+                    provider_candidates[route_provider] = route_candidates
+                except ProviderError as exc:
+                    result["provider_attempts"].append(
+                        {
+                            "provider": route_provider,
+                            "status": "route_error",
+                            "detail": str(exc),
+                        }
+                    )
+                    continue
+
+                route_candidate = _matching_route_candidate(
+                    nearest, route_candidates, config, now
+                )
+                if route_candidate is None:
+                    result["provider_attempts"].append(
+                        {
+                            "provider": route_provider,
+                            "status": "route_miss",
+                            "detail": "no matching live flight",
+                        }
+                    )
+                    continue
+                if not (
+                    route_candidate.get("origin") and route_candidate.get("destination")
+                ):
+                    route_candidate = _try_fr24_summary_route(
+                        route_candidate, config, request_deadline
+                    )
+                filled = _merge_live_route(nearest, route_candidate)
+                result["provider_attempts"].append(
+                    {
+                        "provider": route_provider,
+                        "status": "route_enriched" if filled else "route_unavailable",
+                        "detail": "matching live flight",
+                    }
+                )
+                saved_route = _retain_route(nearest, saved_route, now)
+                if nearest.get("origin") and nearest.get("destination"):
+                    break
+
         result["trmnl_state"] = {"last_route": saved_route} if saved_route else {}
         aircraft = _format_aircraft(nearest)
         result.update(
@@ -1396,9 +1581,6 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                 map_up_bearing_deg=config["map_up_bearing_deg"],
                 fallback_range_nm=config["radius_nm"],
             ),
-        )
-        result["provider_attempts"].append(
-            {"provider": provider, "status": "selected", "detail": f"{candidate_count} candidates"}
         )
         return result
 
