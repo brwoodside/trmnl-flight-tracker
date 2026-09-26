@@ -6,7 +6,7 @@ static_data: ''
 polling_verb: get
 framework_version: latest
 serverless_language: python
-refresh_interval_floor:
+refresh_interval_floor: ''
 polling_url: 'https://api.adsb.lol/v2/point/{% if lat_lon != blank %}{{ lat_lon | split: '','' | first | strip }}/{{ lat_lon | split: '','' | last | strip }}{% else %}{{ latitude }}/{{ longitude }}{% endif %}/{{ radius_nm }}'
 polling_headers: Accept=application/json
 polling_body: ''
