@@ -19,9 +19,14 @@ payload["trmnl"] = {"plugin_settings": {"custom_fields_values": {
     "radius_nm": "20", "max_age_minutes": "5", "provider_order": "open_only",
 }}}
 fixtures = {}
-for scenario in ("aircraft", "rotated", "empty", "provider_error", "configuration_error"):
+for scenario in (
+    "aircraft", "partial_route", "rotated", "empty", "provider_error",
+    "configuration_error",
+):
     data = copy.deepcopy(payload)
-    if scenario == "rotated":
+    if scenario == "partial_route":
+        data["ac"][0]["origin"] = "SFO"
+    elif scenario == "rotated":
         data["trmnl"]["plugin_settings"]["custom_fields_values"]["map_up_bearing_deg"] = "90"
     elif scenario == "empty":
         data["ac"] = []
