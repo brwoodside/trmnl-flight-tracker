@@ -177,6 +177,7 @@ spec.loader.exec_module(transform)
 transform.PAID_PROVIDER_BUDGET_SECONDS = 0.03
 transform._now_utc = lambda: datetime(2026, 8, 25, 12, 2, tzinfo=timezone.utc)
 transform._fetch_fr24 = lambda config: time.sleep(10)
+transform._fetch_fr24_summary_route = lambda *args: time.sleep(10)
 data = json.loads({json.dumps(plugin_input(fixture('adsblol.json'), fr24_api_token='token'))!r})
 print(transform.run(data)['provider_used'])
 """
@@ -584,7 +585,8 @@ class RunTests(unittest.TestCase):
                 )
             )
         self.assertEqual(result["provider_used"], "adsblol")
-        self.assertEqual([a["status"] for a in result["provider_attempts"]], ["error", "error", "selected"])
+        self.assertEqual([a["status"] for a in result["provider_attempts"]],
+                         ["error", "error", "selected", "route_error"])
 
     def test_empty_sky_is_not_reported_as_provider_failure(self):
         payload = {"ac": [], "now": int(FIXED_NOW.timestamp() * 1000)}
@@ -821,7 +823,9 @@ class RouteRetentionTests(unittest.TestCase):
         state = self.first_result()["trmnl_state"]
         payload = fixture("adsblol.json")
         payload["ac"][0].pop("r")
-        self.assertTrue(self.fallback(state, payload)["aircraft"]["route_retained"])
+        result = self.fallback(state, payload)
+        self.assertTrue(result["aircraft"]["route_retained"])
+        self.assertEqual(result["trmnl_state"]["last_route"]["registration"], "N123UA")
 
     def test_tail_number_callsigns_without_a_flight_number_are_not_saved(self):
         self.fr24["data"][0].update(callsign="N123UA", flight=None)
@@ -976,6 +980,133 @@ class RouteRetentionTests(unittest.TestCase):
         self.assertEqual(result["provider_used"], "adsblol")
         self.assertEqual(result["aircraft"]["route"], "SJC → —")
         self.assertTrue(result["aircraft"]["route_retained"])
+
+
+class ADSBRouteLookupTests(unittest.TestCase):
+    def setUp(self):
+        self.clock = mock.patch.object(transform, "_now_utc", return_value=FIXED_NOW)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        self.payload = fixture("adsblol.json")
+        self.payload["now"] = FIXED_NOW.timestamp() * 1000
+        self.payload["ac"][0].update(flight="DAL2635 ", r="N123DL")
+        self.summary = {
+            "fr24_id": "delta-current", "callsign": "DAL2635", "flight": "DL2635",
+            "reg": "N123DL", "orig_icao": "KATL", "dest_icao": "KSFO",
+            "first_seen": "2026-08-25T07:00:00Z",
+            "last_seen": "2026-08-25T12:01:30Z", "flight_ended": False,
+        }
+
+    def run_lookup(self, rows=None, **fields):
+        def fetch(url, headers=None, **kwargs):
+            if url.startswith(transform.FR24_SUMMARY_URL):
+                return {"data": [self.summary] if rows is None else rows}
+            raise transform.ProviderError("position search unavailable")
+        with mock.patch.object(transform, "_fetch_json", side_effect=fetch) as request:
+            result = transform.run(plugin_input(
+                self.payload, fr24_api_token="token", **fields
+            ))
+        return result, request
+
+    def test_delta_adsb_position_gets_fr24_route_without_fr24_position_or_id(self):
+        result, request = self.run_lookup()
+        aircraft = result["aircraft"]
+        self.assertEqual(result["provider_used"], "adsblol")
+        self.assertEqual(aircraft["callsign"], "DAL2635")
+        self.assertEqual(aircraft["route"], "KATL → KSFO")
+        self.assertEqual(aircraft["route_source"], "flightradar24")
+        self.assertEqual(aircraft["latitude"], self.payload["ac"][0]["lat"])
+        self.assertEqual(aircraft["altitude_ft"], self.payload["ac"][0]["alt_baro"])
+        query = transform.urllib.parse.parse_qs(
+            transform.urllib.parse.urlparse(request.call_args.args[0]).query
+        )
+        self.assertEqual(query["callsigns"], ["DAL2635"])
+        self.assertEqual(query["flight_datetime_from"], ["2026-08-24T12:02:00"])
+        self.assertNotIn("flight_ids", query)
+        self.assertEqual(result["provider_attempts"][-1]["status"], "route_enriched")
+        self.assertEqual(result["trmnl_state"]["last_route"]["source"], "flightradar24")
+
+    def test_iata_callsign_queries_canonical_delta_identity(self):
+        self.payload["ac"][0]["flight"] = "DL2635"
+        result, request = self.run_lookup()
+        self.assertEqual(result["aircraft"]["route"], "KATL → KSFO")
+        self.assertIn("callsigns=DAL2635", request.call_args.args[0])
+
+    def test_partial_summary_keeps_either_known_endpoint(self):
+        for missing, expected in (("dest_icao", "KATL → —"), ("orig_icao", "— → KSFO")):
+            with self.subTest(missing=missing):
+                row = {**self.summary, missing: None}
+                result, _ = self.run_lookup([row])
+                self.assertEqual(result["aircraft"]["route"], expected)
+                self.assertEqual(result["aircraft"]["route_source"], "flightradar24")
+
+    def test_prior_legs_conflicting_identity_and_unknown_freshness_are_rejected(self):
+        for changes in (
+            {"flight_ended": True}, {"flight_ended": "true"}, {"flight_ended": None},
+            {"datetime_landed": "2026-08-25T12:01:00Z"},
+            {"last_seen": "2026-08-25T10:00:00Z"}, {"last_seen": None},
+            {"last_seen": "2026-08-26T12:00:00Z"},
+            {"first_seen": "2026-08-26T12:00:00Z"},
+            {"callsign": "DAL456", "flight": "DL456"}, {"reg": "N456DL"},
+        ):
+            with self.subTest(changes=changes):
+                result, _ = self.run_lookup([{**self.summary, **changes}])
+                self.assertEqual(result["aircraft"]["route"], "Route unavailable")
+                self.assertEqual(result["provider_attempts"][-1]["status"], "route_miss")
+
+    def test_previous_leg_is_skipped_but_ambiguous_active_legs_are_rejected(self):
+        prior = {**self.summary, "fr24_id": "previous", "flight_ended": True}
+        result, _ = self.run_lookup([prior, self.summary])
+        self.assertEqual(result["aircraft"]["route"], "KATL → KSFO")
+        other = {**self.summary, "fr24_id": "other", "dest_icao": "KSEA"}
+        result, _ = self.run_lookup([self.summary, other])
+        self.assertEqual(result["aircraft"]["route"], "Route unavailable")
+
+    def test_adsb_only_and_no_credentials_make_no_paid_requests(self):
+        with mock.patch.object(transform, "_fetch_json") as request:
+            for fields in ({"provider_order": "open_only", "fr24_api_token": "token"}, {}):
+                result = transform.run(plugin_input(self.payload, **fields))
+                self.assertEqual(result["provider_used"], "adsblol")
+        request.assert_not_called()
+
+    def test_slow_position_search_leaves_time_for_targeted_summary(self):
+        release = threading.Event()
+        done = threading.Event()
+        def stall(config):
+            try:
+                release.wait(2)
+                return []
+            finally:
+                done.set()
+        with mock.patch.object(transform, "PAID_PROVIDER_BUDGET_SECONDS", 0.12), \
+                mock.patch.object(transform, "_fetch_fr24", side_effect=stall), \
+                mock.patch.object(transform, "_fetch_json", return_value={"data": [self.summary]}):
+            try:
+                start = time.monotonic()
+                result = transform.run(plugin_input(self.payload, fr24_api_token="token"))
+                self.assertLess(time.monotonic() - start, 0.5)
+                self.assertEqual(result["aircraft"]["route"], "KATL → KSFO")
+                self.assertFalse(done.is_set())
+            finally:
+                release.set()
+                self.assertTrue(done.wait(1))
+
+    def test_partial_cached_endpoint_keeps_its_original_expiry_after_summary_completion(self):
+        data = plugin_input(self.payload, fr24_api_token="token")
+        data["trmnl"]["state"] = {"last_route": {
+            "callsign": "DAL2635", "registration": "N123DL", "origin": "KATL",
+            "destination": "", "source": "flightradar24",
+            "observed_at": "2026-08-25T11:00:00+00:00",
+        }}
+        def fetch(url, headers=None, **kwargs):
+            if url.startswith(transform.FR24_SUMMARY_URL):
+                return {"data": [{**self.summary, "orig_icao": None}]}
+            raise transform.ProviderError("unavailable")
+        with mock.patch.object(transform, "_fetch_json", side_effect=fetch):
+            result = transform.run(data)
+        self.assertEqual(result["aircraft"]["route"], "KATL → KSFO")
+        self.assertEqual(result["trmnl_state"]["last_route"]["observed_at"],
+                         "2026-08-25T11:00:00+00:00")
 
 
 class LocationTests(unittest.TestCase):
