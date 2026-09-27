@@ -28,6 +28,20 @@
           <span class="label" data-clamp="2">{{ aircraft.speed_display }} · {{ aircraft.heading_compass }}</span>
         </div>
       </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="hidden lg:flex content">
+          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.vertical_trend_short }}</span>
+          <span class="label" data-clamp="2">{{ aircraft.vertical_rate_display }}</span>
+        </div>
+      </div>
+      <div class="item">
+        <div class="meta"></div>
+        <div class="hidden lg:flex content">
+          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.direction_compass }} {{ aircraft.direction_deg }}</span>
+          <span class="label" data-clamp="2">{{ aircraft.direction_label }}</span>
+        </div>
+      </div>
     </div>
   </div>
   <div class="title_bar title_bar--small">
