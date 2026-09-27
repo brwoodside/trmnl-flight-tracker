@@ -1,14 +1,14 @@
 {% if has_aircraft %}
   <div class="layout layout--col gap--space-between">
     <div class="flex flex--col flex--left w--full gap--none">
-      <span class="label" data-clamp="2">Closest overhead</span>
-      <span class="value value--xlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
+      <span class="label lg:label--large" data-clamp="2">Closest overhead</span>
+      <span class="value value--xlarge lg:value--xxlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
       {% if aircraft.operator %}
-        <span class="title w--full" data-clamp="1">{{ aircraft.operator }}</span>
-        <span class="description w--full" data-clamp="1">{{ aircraft.route }} · {{ aircraft.aircraft_label }}</span>
+        <span class="title lg:title--xlarge w--full" data-clamp="1">{{ aircraft.operator }}</span>
+        <span class="description lg:description--large w--full" data-clamp="1">{{ aircraft.route }} · {{ aircraft.aircraft_label }}</span>
       {% else %}
-        <span class="title w--full" data-clamp="1">{{ aircraft.route }}</span>
-        <span class="description w--full" data-clamp="1">{{ aircraft.aircraft_label }}</span>
+        <span class="title lg:title--xlarge w--full" data-clamp="1">{{ aircraft.route }}</span>
+        <span class="description lg:description--large w--full" data-clamp="1">{{ aircraft.aircraft_label }}</span>
       {% endif %}
     </div>
     <div class="divider"></div>
@@ -16,29 +16,29 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.distance_display }}</span>
-          <span class="label" data-clamp="2">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{{ aircraft.distance_display }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
         </div>
       </div>
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.altitude_compact }}</span>
-          <span class="label" data-clamp="2">Altitude</span>
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{{ aircraft.altitude_compact }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">Altitude</span>
         </div>
       </div>
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.speed_display }}</span>
-          <span class="label" data-clamp="2">Ground speed</span>
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{{ aircraft.speed_display }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">Ground speed</span>
         </div>
       </div>
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium">{{ aircraft.vertical_trend_short }}</span>
-          <span class="label" data-clamp="2">{{ aircraft.heading_compass }} heading</span>
+          <span class="value lg:value--large lg:portrait:value--xlarge">{{ aircraft.vertical_trend_short }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">{{ aircraft.heading_compass }} heading</span>
         </div>
       </div>
     </div>
