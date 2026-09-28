@@ -3,13 +3,13 @@
     <div class="item portrait:w--full">
       <div class="meta"></div>
       <div class="content">
-        <span class="value value--xxlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
+        <span class="value value--xxlarge lg:value--xxxlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
         {% if aircraft.operator %}
-          <span class="title" data-clamp="1">{{ aircraft.operator }}</span>
-          <span class="description" data-clamp="1">{{ aircraft.route }} · {{ aircraft.aircraft_label }}</span>
+          <span class="title lg:title--xlarge" data-clamp="1">{{ aircraft.operator }}</span>
+          <span class="description lg:description--large" data-clamp="1">{{ aircraft.route }} · {{ aircraft.aircraft_label }}</span>
         {% else %}
-          <span class="title" data-clamp="1">{{ aircraft.route }}</span>
-          <span class="description" data-clamp="1">{{ aircraft.aircraft_label }}</span>
+          <span class="title lg:title--xlarge" data-clamp="1">{{ aircraft.route }}</span>
+          <span class="description lg:description--large" data-clamp="1">{{ aircraft.aircraft_label }}</span>
         {% endif %}
       </div>
     </div>
@@ -17,29 +17,29 @@
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.distance_display }}</span>
-          <span class="label" data-clamp="2">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{{ aircraft.distance_display }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">{{ aircraft.bearing_compass }} of {{ location_label }}</span>
         </div>
       </div>
       <div class="item">
         <div class="meta"></div>
         <div class="content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.altitude_compact }}</span>
-          <span class="label" data-clamp="2">{{ aircraft.speed_display }} · {{ aircraft.heading_compass }}</span>
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{{ aircraft.altitude_compact }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">{{ aircraft.speed_display }} · {{ aircraft.heading_compass }}</span>
         </div>
       </div>
-      <div class="item">
+      <div class="item hidden lg:flex">
         <div class="meta"></div>
-        <div class="hidden lg:flex content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.vertical_trend_short }}</span>
-          <span class="label" data-clamp="2">{{ aircraft.vertical_rate_display }}</span>
+        <div class="content">
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{{ aircraft.vertical_trend_short }}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">{{ aircraft.vertical_rate_display }}</span>
         </div>
       </div>
-      <div class="item">
+      <div class="item hidden lg:flex">
         <div class="meta"></div>
-        <div class="hidden lg:flex content">
-          <span class="value value--medium value--tnums" data-value-fit="true">{{ aircraft.direction_compass }} {{ aircraft.direction_deg }}</span>
-          <span class="label" data-clamp="2">{{ aircraft.direction_label }}</span>
+        <div class="content">
+          <span class="value lg:value--large lg:portrait:value--xlarge value--tnums" data-value-fit="true">{% if aircraft.direction_deg != nil %}{{ aircraft.direction_compass }} {{ aircraft.direction_deg }}°{% else %}—{% endif %}</span>
+          <span class="label lg:label--large lg:portrait:label--xxlarge" data-clamp="2">{{ aircraft.direction_label }}</span>
         </div>
       </div>
     </div>
@@ -50,8 +50,8 @@
   </div>
 {% else %}
   <div class="layout layout--col layout--center">
-    <span class="value value--large">No aircraft</span>
-    <span class="description">{{ message }}</span>
+    <span class="value value--large lg:value--xlarge" data-value-fit="true">No aircraft</span>
+    <span class="description lg:description--large" data-clamp="3">{{ message }}</span>
   </div>
   <div class="title_bar title_bar--small">
     <span class="title">Overhead Flight Tracker</span>
