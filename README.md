@@ -50,7 +50,9 @@ An in-flight operation may finish in the background, but it cannot prevent proce
 exit or start another request after its deadline. This reserves time for the
 already-polled ADSB.lol fallback and formatting. Slow paid responses can therefore
 cause fallback even if the provider would eventually succeed. Without credentials,
-paid requests and workers are skipped entirely.
+paid requests and workers are skipped entirely. When FR24 is enabled, position
+searches stop by 2.2 seconds, reserving up to 0.8 seconds of the shared budget for
+a route summary lookup for the selected aircraft.
 
 When FR24 selects a position with a flight ID but no complete route, and saved
 state cannot fill it, the transform makes one same-provider Flight Summary Light
@@ -60,6 +62,27 @@ summary lookup. Failure is non-fatal and leaves the live position intact. FR24
 currently prices a returned live light summary at one credit (and an empty query
 at one processing credit), so this can add one credit for a newly encountered
 route-less FR24 flight.
+
+An ADSB.lol-selected aircraft does not need an FR24 position or `fr24_id` to
+obtain a route. If matching provider responses and saved state cannot fill it,
+the transform queries FR24 Flight Summary Light directly using its canonical
+callsign (for example, `DAL2635`). The documented query searches a 24-hour
+`first_seen` window so it includes long-haul flights, with at most five returned
+records. Only a single, still-active flight with a recent `last_seen`, matching
+identity, and no conflicting registration qualifies; previous legs, landed
+flights, stale records, and ambiguous matches are rejected. The ADSB.lol position
+and telemetry remain the displayed values. Known origin or destination alone
+still counts as useful route data. This requires a configured FR24 API token;
+an FR24 website subscription or a route visible on its website is not an API
+credential. `ADSB.lol only` continues to make no paid requests.
+
+This targeted lookup uses the same 0.8-second bound and shared three-second
+budget, and may charge for up to five returned records, including rejected
+previous legs. Successful results are cached with the original route expiry.
+`provider_attempts` records summary success, no matching route, or request failure
+so an unavailable route can be distinguished from a failed request. See the
+[official Flight Summary API](https://fr24api.flightradar24.com/docs/endpoints/flight-summary)
+for query parameters and current per-record prices.
 
 If that still leaves either endpoint missing, the transform reuses already-fetched
 provider responses and conditionally checks the remaining configured providers
@@ -110,6 +133,9 @@ saved. Each screen contains the selected aircraft and small diagnostic metadata.
 - If no retained route matches a selected FR24 position, use its `fr24_id` for
   the bounded same-provider light-summary lookup described above. Conflicting
   live and summary endpoints are rejected rather than combined.
+- If the selected aircraft still lacks an endpoint and no FR24 summary was tried,
+  query the summary directly by callsign. A failed FR24 position search does not
+  disable this independent route lookup.
 - Retained route fields expire two hours after their original observation, even during
   repeated fallback refreshes. Empty/error refreshes preserve an unexpired route.
   Only the most recent route is retained, so this is not a flight-history cache.

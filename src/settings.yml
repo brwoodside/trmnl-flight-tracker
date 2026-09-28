@@ -88,7 +88,7 @@ custom_fields:
 - keyname: fr24_api_token
   field_type: password
   name: Flightradar24 API token
-  description: Optional paid FR24 API token. Uses Live Flight Positions Full.
+  description: Optional paid FR24 API token. Enables live positions and route lookups for the selected flight, including ADSB.lol contacts. Required even if you have an FR24 website subscription.
   placeholder: Optional
   optional: true
   group: Data providers
