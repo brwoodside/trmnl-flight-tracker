@@ -59,6 +59,16 @@ classes so device fonts, responsive sizes, and content fitting stay native.
     stroke: #fff;
     stroke-width: .7;
   }
+
+  .radar-scope .radar-selection {
+    fill: #000;
+    stroke: #fff;
+    stroke-width: .8;
+    paint-order: stroke;
+    font-family: var(--label-font-family);
+    font-size: 7px;
+    font-weight: bold;
+  }
 </style>
 
 {% if has_aircraft or status == "no_aircraft" %}
@@ -69,7 +79,7 @@ classes so device fonts, responsive sizes, and content fitting stay native.
         <svg class="radar-scope" viewBox="3.5 3.5 93 93" role="img" aria-labelledby="radar-title radar-description">
         <title id="radar-title">Aircraft range and bearing scope</title>
         {% if has_aircraft %}
-          <desc id="radar-description">{{ aircraft.identifier }} is {{ aircraft.distance_display }} {{ aircraft.bearing_compass }} of {{ location_label }}.</desc>
+          <desc id="radar-description">{{ scope.contacts.size }} closest aircraft. {{ aircraft.identifier | escape }}, marked with an asterisk, supplies the displayed stats and is {{ aircraft.distance_display }} {{ aircraft.bearing_compass }} of {{ location_label | escape }}.</desc>
         {% else %}
           <desc id="radar-description">No fresh aircraft are within {{ search_radius_nm | round }} nautical miles of {{ location_label }}.</desc>
         {% endif %}
@@ -83,15 +93,23 @@ classes so device fonts, responsive sizes, and content fitting stay native.
         <path class="radar-center-mark" d="M46.5 50h7 M50 46.5v7" />
 
         {% if has_aircraft %}
-          {% if scope.aircraft_rotation_deg != nil %}
+          {% for contact in scope.contacts reversed %}
+          <g class="radar-contact" data-selected="{{ contact.selected }}">
+          <title>{{ contact.identifier | escape }}{% if contact.selected %} * — displayed stats{% endif %}</title>
+          {% if contact.rotation_deg != nil %}
             <path
               class="radar-target"
               d="M224 116c-12 17-17 45-18 77l-72 43v22l72-23 3 57-30 22v17l45-13 45 13v-17l-30-22 3-57 72 23v-22l-72-43c-1-32-6-60-18-77Z"
-              transform="translate({{ scope.aircraft_x }} {{ scope.aircraft_y }}) rotate({{ scope.aircraft_rotation_deg }}) scale(.04) translate(-224 -223.5)"
+              transform="translate({{ contact.x }} {{ contact.y }}) rotate({{ contact.rotation_deg }}) scale(.04) translate(-224 -223.5)"
             />
           {% else %}
-            <circle class="radar-target-dot" cx="{{ scope.aircraft_x }}" cy="{{ scope.aircraft_y }}" r="2.7" />
+            <circle class="radar-target-dot" cx="{{ contact.x }}" cy="{{ contact.y }}" r="2.7" />
           {% endif %}
+          {% if contact.selected %}
+            <text class="radar-selection" x="{{ contact.x | plus: 4 }}" y="{{ contact.y }}">*</text>
+          {% endif %}
+          </g>
+          {% endfor %}
         {% endif %}
 
         <g transform="translate({{ scope.north_x }} {{ scope.north_y }})">
@@ -111,7 +129,7 @@ classes so device fonts, responsive sizes, and content fitting stay native.
     {% if has_aircraft %}
       <div class="flex flex--col flex--left stretch gap--small lg:gap--large">
         <div class="flex flex--col flex--left gap--none w--full">
-          <span class="label lg:label--large">Closest contact</span>
+          <span class="label lg:label--large">Closest contact * · Displayed stats</span>
           <span class="value value--large lg:value--xlarge" data-value-fit="true">{{ aircraft.identifier }}</span>
           <span class="title lg:title--large w--full" data-clamp="1">{{ aircraft.operator | default: "Airline unavailable" }}</span>
           <span class="description lg:description--large w--full" data-clamp="1">{{ aircraft.route }}</span>

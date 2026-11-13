@@ -1,6 +1,6 @@
 # TRMNL Overhead Flight Tracker
 
-A current-format TRMNL polling plugin that plots the closest fresh, airborne
+A current-format TRMNL polling plugin that plots the three closest fresh, airborne
 aircraft on a configurable radar scope centered on a latitude/longitude. It
 refreshes on a requested 10-minute cadence and runs entirely in TRMNL's polling
 plus hosted Python transform environment—no separate application server is required.
@@ -111,7 +111,7 @@ saved. Each screen contains the selected aircraft and small diagnostic metadata.
 - Calculate the initial bearing and 16-point compass direction from the
   configured location.
 - Select the smallest enclosing scope range from 1, 2, 5, 10, 20, 50, 100,
-  or 250 nautical miles and plot the contact in a normalized range-and-bearing view.
+  or 250 nautical miles enclosing up to three contacts in a normalized range-and-bearing view.
 - Orient the target with true heading when available, otherwise use ground
   track. When neither is available, show a position dot instead of implying a direction.
 - Fall through to the next provider if the current source errors or has no
@@ -152,6 +152,14 @@ interpretation of "overhead" and avoids treating a low, distant aircraft as
 closer than one directly above.
 
 ## Radar scope and display fields
+
+The full-view scope plots up to **three closest fresh airborne aircraft** from
+the selected position provider, ordered by horizontal distance. An asterisk
+beside the closest contact and in the stats heading identifies the aircraft
+supplying the telemetry panel. Route enrichment still applies only to that
+aircraft; extra contacts do not trigger extra provider requests. The scope range
+encloses the farthest displayed contact. With fewer than three available, it
+shows only those available; compact views retain their single-aircraft stats.
 
 The full view places a vector radar scope next to a telemetry panel on
 landscape screens and stacks them in portrait. TRMNL Framework classes handle

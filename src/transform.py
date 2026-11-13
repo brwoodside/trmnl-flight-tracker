@@ -628,10 +628,12 @@ def _scope_data(
     direction_deg: float | None,
     map_up_bearing_deg: float,
     fallback_range_nm: float,
+    contacts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    range_nm = select_scope_range(
-        distance_nm if distance_nm is not None else fallback_range_nm
-    )
+    enclosing_distance = distance_nm if distance_nm is not None else fallback_range_nm
+    if contacts:
+        enclosing_distance = max(item["distance_nm"] for item in contacts)
+    range_nm = select_scope_range(enclosing_distance)
     if distance_nm is not None and bearing_deg is not None:
         aircraft_x, aircraft_y = scope_coordinates(
             distance_nm, bearing_deg, range_nm, map_up_bearing_deg
@@ -641,7 +643,24 @@ def _scope_data(
     north_x, north_y = scope_coordinates(
         range_nm, 0, range_nm, map_up_bearing_deg
     )
+    markers = []
+    for index, item in enumerate(contacts or []):
+        x, y = scope_coordinates(
+            item["distance_nm"], item["bearing_deg"], range_nm, map_up_bearing_deg
+        )
+        direction, _ = _selected_direction(item)
+        markers.append({
+            "identifier": item["identifier"],
+            "selected": index == 0,
+            "x": x,
+            "y": y,
+            "rotation_deg": (
+                round((direction - map_up_bearing_deg) % 360, 1)
+                if direction is not None else None
+            ),
+        })
     return {
+        "contacts": markers,
         "range_nm": range_nm,
         "aircraft_x": aircraft_x,
         "aircraft_y": aircraft_y,
@@ -1081,9 +1100,9 @@ def _age_minutes(observed_at: str | None, now: datetime) -> float | None:
     return max(0.0, (now - parsed).total_seconds() / 60.0)
 
 
-def _select_nearest(
+def _rank_candidates(
     candidates: Iterable[dict[str, Any]], config: dict[str, Any], now: datetime
-) -> tuple[dict[str, Any] | None, int]:
+) -> list[dict[str, Any]]:
     usable: list[dict[str, Any]] = []
     for candidate in candidates:
         distance = haversine_nm(
@@ -1109,7 +1128,7 @@ def _select_nearest(
         usable.append(enriched)
 
     usable.sort(key=lambda item: (item["distance_nm"], -(item.get("altitude_ft") or 0)))
-    return (usable[0] if usable else None, len(usable))
+    return usable
 
 
 def _provider_sequence(config: dict[str, Any]) -> list[str]:
@@ -1540,7 +1559,8 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                 candidates = normalize_adsblol(input)
             provider_candidates[provider] = candidates
             any_successful_response = True
-            nearest, candidate_count = _select_nearest(candidates, config, now)
+            ranked = _rank_candidates(candidates, config, now)
+            nearest, candidate_count = (ranked[0] if ranked else None, len(ranked))
         except ProviderError as exc:
             result["provider_attempts"].append(
                 {"provider": provider, "status": "error", "detail": str(exc)}
@@ -1657,6 +1677,7 @@ def run(input: dict[str, Any]) -> dict[str, Any]:
                 direction_deg=_selected_direction(nearest)[0],
                 map_up_bearing_deg=config["map_up_bearing_deg"],
                 fallback_range_nm=config["radius_nm"],
+                contacts=[nearest, *ranked[1:3]],
             ),
         )
         return result
