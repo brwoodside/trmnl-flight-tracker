@@ -20,10 +20,18 @@ payload["trmnl"] = {"plugin_settings": {"custom_fields_values": {
 }}}
 fixtures = {}
 for scenario in (
-    "aircraft", "partial_route", "rotated", "empty", "provider_error",
+    "aircraft", "three_aircraft", "overlapping", "partial_route", "rotated", "empty", "provider_error",
     "configuration_error",
 ):
     data = copy.deepcopy(payload)
+    if scenario in ("three_aircraft", "rotated", "overlapping"):
+        data["ac"].append({
+            **data["ac"][0], "hex": "abcdef", "flight": "DAL2635",
+            "r": "N2635", "lat": 37.72, "lon": -122.35, "track": 35,
+        })
+        if scenario == "overlapping":
+            for row in data["ac"]:
+                row["lat"], row["lon"] = 37.783, -122.41
     if scenario == "partial_route":
         data["ac"][0]["origin"] = "SFO"
     elif scenario == "rotated":

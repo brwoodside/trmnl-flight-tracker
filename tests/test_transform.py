@@ -417,7 +417,8 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["aircraft"]["aircraft_label"], "BOEING 737-800 · N123UA")
         self.assertEqual(result["aircraft"]["route"], "Route unavailable")
         self.assertLess(result["aircraft"]["distance_nm"], 1)
-        self.assertEqual(result["scope"]["range_nm"], 1)
+        self.assertEqual(result["scope"]["range_nm"], 10)
+        self.assertEqual(len(result["scope"]["contacts"]), 2)
         self.assertEqual(result["aircraft"]["direction_label"], "Ground track")
         self.assertEqual(result["aircraft"]["heading_deg"], 132)
 
@@ -430,6 +431,48 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["aircraft"]["direction_deg"], 87)
         self.assertEqual(result["aircraft"]["direction_label"], "True heading")
         self.assertEqual(result["aircraft"]["heading_deg"], 87)
+
+    def test_scope_three_closest_share_range_and_selected_stats(self):
+        payload = fixture("adsblol.json")
+        template = payload["ac"][0]
+        payload["ac"] = [
+            {**template, "flight": f"TEST{index}", "r": f"N{index}",
+             "lat": 37.7749 + offset, "lon": -122.4194}
+            for index, offset in enumerate([0.10, 0.01, 0.05, 0.20])
+        ]
+        result = transform.run(plugin_input(payload, provider_order="open_only", map_up_bearing_deg="90"))
+        contacts = result["scope"]["contacts"]
+        self.assertEqual([item["identifier"] for item in contacts], ["TEST1", "TEST2", "TEST0"])
+        self.assertEqual([item["selected"] for item in contacts], [True, False, False])
+        self.assertEqual(result["aircraft"]["identifier"], contacts[0]["identifier"])
+        self.assertEqual(result["candidate_count"], 4)
+        self.assertEqual(result["scope"]["range_nm"], 10)
+        self.assertEqual(result["scope"]["aircraft_x"], contacts[0]["x"])
+        for contact in contacts:
+            self.assertEqual(contact["rotation_deg"], 42)
+            self.assertAlmostEqual(contact["y"], 50)
+            self.assertLess(contact["x"], 50)
+
+    def test_scope_excludes_ground_stale_and_outside_radius(self):
+        payload = fixture("adsblol.json")
+        payload["now"] = FIXED_NOW.timestamp() * 1000
+        template = payload["ac"][0]
+        payload["ac"] += [
+            {**template, "flight": "STALE1", "seen_pos": 9999},
+            {**template, "flight": "FAR1", "lat": 40},
+        ]
+        result = transform.run(plugin_input(payload, provider_order="open_only"))
+        self.assertEqual([c["identifier"] for c in result["scope"]["contacts"]], ["UAL123", "TEST45"])
+
+    def test_scope_zero_and_one_contacts(self):
+        for count in (0, 1):
+            payload = fixture("adsblol.json")
+            payload["ac"] = payload["ac"][:count]
+            result = transform.run(plugin_input(payload, provider_order="open_only"))
+            self.assertEqual(len(result["scope"]["contacts"]), count)
+            if count:
+                self.assertTrue(result["scope"]["contacts"][0]["selected"])
+                self.assertEqual(result["scope"]["range_nm"], 1)
 
     def test_custom_map_up_rotates_aircraft_glyph(self):
         result = transform.run(
@@ -453,6 +496,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["aircraft"]["direction_label"], "Direction unavailable")
         self.assertIsNone(result["aircraft"]["heading_deg"])
         self.assertIsNone(result["scope"]["aircraft_rotation_deg"])
+        self.assertTrue(all(c["rotation_deg"] is None for c in result["scope"]["contacts"]))
 
     def test_fr24_is_preferred_when_token_is_present(self):
         with mock.patch.object(transform, "_fetch_json", return_value=fixture("fr24.json")) as fetch:
@@ -461,6 +505,7 @@ class RunTests(unittest.TestCase):
             )
         self.assertEqual(result["provider_used"], "flightradar24")
         self.assertEqual(result["aircraft"]["route"], "SFO → SEA")
+        self.assertEqual(result["scope"]["contacts"][0]["identifier"], result["aircraft"]["identifier"])
         request_headers = fetch.call_args.args[1]
         self.assertEqual(request_headers["Authorization"], "Bearer fr24-secret")
         self.assertEqual(result["aircraft"]["operator"], "Scandinavian Airlines")

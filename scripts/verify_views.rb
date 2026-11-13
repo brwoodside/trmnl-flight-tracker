@@ -38,6 +38,13 @@ begin
       source = File.read("#{root}/src/shared.liquid") + File.read("#{root}/src/#{view}.liquid")
       body = Liquid::Template.parse(source, environment: TRMNL::Liquid.new).render!(data)
       text = body.gsub(/<[^>]*>/, " ")
+      if view == 'full'
+        contacts = data.dig('scope', 'contacts') || []
+        raise "Wrong scope contact count: #{scenario}" unless body.scan('class="radar-contact"').length == contacts.length
+        expected_selected = contacts.empty? ? 0 : 1
+        raise "Wrong selected marker count: #{scenario}" unless body.scan('class="radar-selection"').length == expected_selected
+        raise "Missing stats legend: #{scenario}" if data['has_aircraft'] && !text.include?('Closest contact * · Displayed stats')
+      end
       raise "Missing layout/title bar: #{view}/#{scenario}" unless body.scan(/<div class="layout(?:\s|")/).length == 1 && body.scan(/<div class="title_bar(?:\s|")/).length == 1
       if view == 'quadrant'
         expected = {
@@ -64,7 +71,7 @@ begin
         # Full device matrix for normal content and radar rotation; error-state
         # screenshots exercise the changed quadrant. All states render to HTML.
         render_screenshot = %w[aircraft partial_route].include?(scenario) ||
-                            (scenario == 'rotated' && view == 'full') ||
+                            (%w[rotated three_aircraft overlapping].include?(scenario) && view == 'full') ||
                             (!%w[rotated partial_route].include?(scenario) && view == 'quadrant')
         next unless render_png && render_screenshot
 
